@@ -1,5 +1,6 @@
 .pytest*
 .idea
+__pycache__*
 /TGL/
 .ipynb_checkpoints*
 /Datasets/PhysioNet_2012/
