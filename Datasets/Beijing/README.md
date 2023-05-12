@@ -1,1 +1,4 @@
-source: https://archive.ics.uci.edu/ml/datasets/Beijing+Multi-Site+Air-Quality+Data
+To download the required data simply run:
+~~~console
+ bash ./base/download_data.sh
+~~~
