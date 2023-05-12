@@ -1,0 +1,10 @@
+.pytest*
+.idea
+/TGL/
+.ipynb_checkpoints*
+/Datasets/PhysioNet_2012/
+/Datasets/OU_Gait/
+/Datasets/nntimeseries/
+/Datasets/CMPC/
+/Datasets/BRITS/
+/.mypy_cache/

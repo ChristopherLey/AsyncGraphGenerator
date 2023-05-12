@@ -1,0 +1,4 @@
+data_root: /data/Datastore/Beijing
+base: 'Beijing'
+host: '127.0.0.1'
+port: 27017
