@@ -58,7 +58,13 @@ class FeedForward(nn.Module):
 
 
 class SelfAttentionBlock(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.2):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        dropout: float = 0.2,
+        batch_first: bool = True,
+    ):
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)  # node normalisation
         self.self_attention = nn.MultiheadAttention(
@@ -67,15 +73,34 @@ class SelfAttentionBlock(nn.Module):
             dropout=dropout,
             kdim=embed_dim,
             vdim=embed_dim,
+            batch_first=batch_first,
         )
+        self.num_heads = num_heads
         self.norm2 = nn.LayerNorm(embed_dim)
         self.feed_forward = FeedForward(
             embed_dim, hidden_dim=4 * embed_dim, dropout=dropout
         )
 
-    def forward(self, x, attention_mask):
+    def forward(
+        self,
+        x: Tensor,
+        attention_mask: Tensor,
+        key_padding_mask: Optional[Tensor] = None,
+    ):
         h = self.norm1(x)
-        attention, _ = self.self_attention(h, h, h, attn_mask=attention_mask)
+        if len(attention_mask.shape) == 3:
+            B, N, _ = attention_mask.shape
+            multihead_mask = (
+                attention_mask.unsqueeze(0)
+                .repeat(self.num_heads, 1, 1, 1)
+                .transpose(1, 0)
+                .reshape(-1, N, N)
+            )
+        else:
+            multihead_mask = attention_mask
+        attention, _ = self.self_attention(
+            h, h, h, attn_mask=multihead_mask, key_padding_mask=key_padding_mask
+        )
         x = x + attention
         x = x + self.feed_forward(self.norm2(x))
         return x
@@ -83,7 +108,12 @@ class SelfAttentionBlock(nn.Module):
 
 class CrossAttentionBlock(nn.Module):
     def __init__(
-        self, target_dim: int, source_dim: int, num_heads: int, dropout: float = 0.2
+        self,
+        target_dim: int,
+        source_dim: int,
+        num_heads: int,
+        dropout: float = 0.2,
+        batch_first: bool = True,
     ):
         super().__init__()
         self.norm1_source = nn.LayerNorm(source_dim)  # node normalisation
@@ -94,6 +124,7 @@ class CrossAttentionBlock(nn.Module):
             dropout=dropout,
             kdim=source_dim,
             vdim=source_dim,
+            batch_first=batch_first,
         )
         self.norm2 = nn.LayerNorm(target_dim)
         self.feed_forward = FeedForward(
@@ -101,12 +132,16 @@ class CrossAttentionBlock(nn.Module):
         )
 
     def forward(
-        self, target: Tensor, source: Tensor, attention_mask: Optional[Tensor] = None
+        self, target: Tensor, source: Tensor, key_padding_mask: Optional[Tensor] = None
     ):
         key = self.norm1_source(source)
-        mask = torch.ones((target.shape[-2], source.shape[-2])) == 0
+        mask = (torch.ones((target.shape[-2], source.shape[-2])) == 0).to(key.device)
         attention, _ = self.self_attention(
-            query=self.norm1_target(target), key=key, value=key, attn_mask=mask
+            query=self.norm1_target(target),
+            key=key,
+            value=key,
+            attn_mask=mask,
+            key_padding_mask=key_padding_mask,
         )
         x = target + attention
         x = x + self.feed_forward(self.norm2(x))
@@ -116,6 +151,7 @@ class CrossAttentionBlock(nn.Module):
 class AsynchronousGraphGenerator(nn.Module):
     def __init__(
         self,
+        input_dim,
         feature_dim,
         num_heads,
         time_embedding_dim,
@@ -135,6 +171,7 @@ class AsynchronousGraphGenerator(nn.Module):
             + spatial_embedding_dim
             + categorical_embedding_dim
         )
+        self.feature_projection = nn.Linear(input_dim, feature_dim)
         self.query_dim = time_embedding_dim + type_embedding_dim + spatial_embedding_dim
         self.time_embed = Time2Vec(time_embedding_dim)
         self.type_embed = nn.Embedding(num_node_types, type_embedding_dim)
@@ -152,102 +189,67 @@ class AsynchronousGraphGenerator(nn.Module):
         self.cross_attention_2 = CrossAttentionBlock(
             self.query_dim, self.node_feature_dim, num_heads, dropout
         )
+        self.head = FeedForward(self.query_dim, output_size=input_dim, dropout=dropout)
 
         self.mse = nn.MSELoss()
 
-    def forward(self, graph: ContinuousTimeGraphSample) -> Tuple[Tensor, Tensor]:
-        features = graph.node_features.unsqueeze(-1)
-        time_encode = self.time_embed(graph.time.unsqueeze(-1))
-        type_encode = self.type_embed(graph.type_index)
-        spatial_encode = self.spatial_embed(graph.spatial_index)
-        categorical_encode = self.categorical_embedding(graph.category_index)
+    def forward(
+        self, graph: ContinuousTimeGraphSample, device: torch.device = "cpu"
+    ) -> Tuple[Tensor, Tensor]:
+
+        features = self.feature_projection(graph.node_features.unsqueeze(-1).to(device))
+        time_encode = self.time_embed(graph.time.unsqueeze(-1).to(device))
+        type_encode = self.type_embed(graph.type_index.to(device))
+        spatial_encode = self.spatial_embed(graph.spatial_index.to(device))
+        source_list = [features, time_encode, type_encode, spatial_encode]
+        if graph.category_index is not None:
+            categorical_encode = self.categorical_embedding(
+                graph.category_index.to(device)
+            )
+            source_list.append(categorical_encode)
         source = torch.cat(
-            [features, time_encode, type_encode, spatial_encode, categorical_encode],
+            source_list,
             dim=-1,
         )
         target = torch.cat(
             [
-                self.time_embed(graph.target.time.unsqueeze(-1)),
-                self.type_embed(graph.target.type_index),
-                self.spatial_embed(graph.target.spatial_index),
+                self.time_embed(graph.target.time.unsqueeze(-1).to(device)),
+                self.type_embed(graph.target.type_index.to(device)),
+                self.spatial_embed(graph.target.spatial_index.to(device)),
             ],
             dim=-1,
         )
-        h = self.graph_attention(source, graph.attention_mask)
-        y_hat = self.cross_attention(target, source)
-        y_hat = self.cross_attention_2(y_hat, h)
-        loss = self.mse(y_hat, graph.target.features)
+        key_padding_mask = graph.key_padding_mask.to(device)
+        attn_mask = graph.attention_mask.to(device)
+        h = self.graph_attention(source, attn_mask, key_padding_mask)
+        y_hat = self.cross_attention(target, source, key_padding_mask)
+        y_hat = self.cross_attention_2(y_hat, h, key_padding_mask)
+        y_hat = self.head(y_hat)
+        loss = self.mse(y_hat.squeeze(-1), graph.target.features.to(device))
         return loss, y_hat
 
 
 if __name__ == "__main__":
     from Datasets.Beijing.datareader import AirQualityData
     from pathlib import Path
+    from torch.utils.data import DataLoader
+    from AGG.extended_typing import collate_graph_samples
 
-    features = [
-        "PM2.5",
-        "PM10",
-        "SO2",
-        "NO2",
-        "CO",
-        "O3",
-        "TEMP",
-        "PRES",
-        "DEWP",
-        "RAIN",
-        "WSPM",
-    ]
-    time = "datetime"
-    category = "wd"
-    spatial = "station"
-    unique_wd = [
-        "NNW",
-        "E",
-        "NW",
-        "WNW",
-        "N",
-        "ENE",
-        "NNE",
-        "W",
-        "NE",
-        "SSW",
-        "ESE",
-        "SE",
-        "S",
-        "SSE",
-        "SW",
-        "WSW",
-        "None",
-    ]
-    unique_stations = [
-        "Aotizhongxin",
-        "Changping",
-        "Dingling",
-        "Dongsi",
-        "Guanyuan",
-        "Gucheng",
-        "Huairou",
-        "Nongzhanguan",
-        "Shunyi",
-        "Tiantan",
-        "Wanliu",
-        "Wanshouxigong",
-    ]
     reader = AirQualityData(10, Path("../Datasets/Beijing/data/mongo_config.yaml"))
-    graph_sample = reader[0]
-    source = graph_sample.node_features.unsqueeze(-1)
-    # agg = AsynchronousGraphGenerator(
-    #    feature_dim=1,
-    #    num_heads=1,
-    #    time_embedding_dim=1,
-    #    num_node_types=len(features),
-    #    type_embedding_dim=1,
-    #    num_spatial_components=len(unique_stations),
-    #    spatial_embedding_dim=1,
-    #    num_categories=len(unique_wd),
-    #    categorical_embedding_dim=1,
-    #    dropout=0.0
-    # )
-    test_att = SelfAttentionBlock(1, 1, 0)
-    h = test_att(source, graph_sample.attention_mask)
-    test_att(graph_sample)
+    print(len(reader))
+    loader = DataLoader(reader, batch_size=2, collate_fn=collate_graph_samples)
+    graph_sample = next(iter(loader))
+    agg = AsynchronousGraphGenerator(
+        input_dim=1,
+        feature_dim=10,
+        num_heads=5,
+        time_embedding_dim=10,
+        num_node_types=len(reader.type_index),
+        type_embedding_dim=10,
+        num_spatial_components=len(reader.spatial_index),
+        spatial_embedding_dim=10,
+        num_categories=len(reader.category_index),
+        categorical_embedding_dim=10,
+        dropout=0.0,
+    )
+    print(agg(graph_sample))

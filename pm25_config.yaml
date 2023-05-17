@@ -1,0 +1,18 @@
+data_params:
+  block_size: 10
+  db_config: "./Datasets/Beijing/data/mongo_config.yaml"
+  batch_size: 100
+  num_workers: 12
+model_params:
+  input_dim: 1
+  feature_dim: 10
+  num_heads: 5
+  time_embedding_dim: 10
+  type_embedding_dim: 10
+  spatial_embedding_dim: 10
+  categorical_embedding_dim: 10
+  dropout: 0.2
+optimiser_params:
+  lr: 0.002
+logging_params:
+  name: "AGG"

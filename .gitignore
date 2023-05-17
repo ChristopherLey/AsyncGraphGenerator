@@ -1,6 +1,7 @@
 .pytest*
 .idea
 __pycache__*
+*/__pycache__/*
 /TGL/
 .ipynb_checkpoints*
 /Datasets/PhysioNet_2012/
@@ -9,7 +10,7 @@ __pycache__*
 /Datasets/CMPC/
 /Datasets/BRITS/
 /.mypy_cache/
-/References/brist_long_ver.pdf
-/References/entropy-25-00247.pdf
-/References/IJCAI-16-fill-missing-values-Yu-Zheng.pdf
-/References/NeurIPS-2018-brits-bidirectional-recurrent-imputation-for-time-series-Paper.pdf
+/References/*
+/lightning_logs/*/checkpoints
+/lightning_logs/*/hparams.yaml
+lightning_logs/*/events.*

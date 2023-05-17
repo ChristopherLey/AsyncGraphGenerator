@@ -3,7 +3,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
+import numpy as np
 import pandas as pd
+import torch
 import yaml
 from pymongo import MongoClient
 from sklearn.preprocessing import MinMaxScaler
@@ -84,6 +86,7 @@ target_template: Dict[str, list] = {
 }
 graph_template: dict = {
     "node_features": [],
+    "key_padding_mask": [],
     "time": [],
     "edge_index": [],
     "type_index": [],
@@ -93,14 +96,25 @@ graph_template: dict = {
 }
 
 
-def decompose_data(config: dict, block_size: int):
+def decompose_data(config: dict, block_size: int, exists_ok: bool = True):
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client["Beijing"]
     df: pd.DataFrame = pd.read_hdf(Path(config["data_root"]) / "pm2_5_df.h5")  # noqa
     locations = len(unique_stations)
     scaler = MinMaxScaler()
     df[features] = scaler.fit_transform(df[features])
-    block_data = db[f"block_{block_size}"]
+    block_name = f"block_{block_size:02d}"
+    existing_collections = db.list_collection_names(
+        filter={"name": {"$regex": block_name}}
+    )
+    if not exists_ok:
+        for entry in existing_collections:
+            db.drop_collection(entry)
+    else:
+        if len(existing_collections) > 0:
+            return
+
+    block_data = db[block_name]
     meta = {
         "type": block_size,
         "scaler": {
@@ -124,6 +138,9 @@ def decompose_data(config: dict, block_size: int):
             )
             for mask in training_masks
         ],
+        "type_index": features,
+        "spatial_index": unique_stations,
+        "category_index": unique_wd,
     }
     block_data.insert_one(meta)
     for i, mask_set in enumerate([training_masks, test_masks]):
@@ -149,7 +166,12 @@ def decompose_data(config: dict, block_size: int):
                     line = sources.iloc[source]
                     tau = (target_time - line[time]).seconds / (block_size * 3600)
                     for m, key in enumerate(features):
-                        graph["node_features"].append(line[key])
+                        if np.isnan(line[key]):
+                            graph["key_padding_mask"].append(True)
+                            graph["node_features"].append(0)
+                        else:
+                            graph["node_features"].append(line[key])
+                            graph["key_padding_mask"].append(False)
                         graph["type_index"].append(m)
                         graph["spatial_index"].append(
                             unique_stations.index(line[spatial])
@@ -161,6 +183,8 @@ def decompose_data(config: dict, block_size: int):
                     tau = (target_time - line[time]).seconds / (block_size * 3600)
                     for m, key in enumerate(features):
                         target = copy.deepcopy(target_template)
+                        if np.isnan(line[key]):  # invalid target feature
+                            continue
                         graph_sample = copy.deepcopy(graph)
                         target["features"].append(line[key])
                         target["type_index"].append(m)
@@ -177,9 +201,18 @@ def decompose_data(config: dict, block_size: int):
                             for o, key in enumerate(features):
                                 if n == target:
                                     if o != m:
-                                        graph_sample["node_features"].append(
-                                            not_targets[key]
-                                        )
+                                        if np.isnan(not_targets[key]):
+                                            graph_sample["node_features"].append(0)
+                                            graph_sample["key_padding_mask"].append(
+                                                True
+                                            )
+                                        else:
+                                            graph_sample["node_features"].append(
+                                                not_targets[key]
+                                            )
+                                            graph_sample["key_padding_mask"].append(
+                                                False
+                                            )
                                         graph_sample["type_index"].append(o)
                                         graph_sample["spatial_index"].append(
                                             unique_stations.index(not_targets[spatial])
@@ -189,9 +222,14 @@ def decompose_data(config: dict, block_size: int):
                                         )
                                         graph_sample["time"].append(tau2)
                                 else:
-                                    graph_sample["node_features"].append(
-                                        not_targets[key]
-                                    )
+                                    if np.isnan(not_targets[key]):
+                                        graph_sample["node_features"].append(0)
+                                        graph_sample["key_padding_mask"].append(True)
+                                    else:
+                                        graph_sample["node_features"].append(
+                                            not_targets[key]
+                                        )
+                                        graph_sample["key_padding_mask"].append(False)
                                     graph_sample["type_index"].append(o)
                                     graph_sample["spatial_index"].append(
                                         unique_stations.index(not_targets[spatial])
@@ -238,9 +276,14 @@ class AirQualityData(Dataset):
         self.split = version
         db_handle = mongo_db_client[self.mongo_config["base"]][
             self.preprocessing_reference
-        ][self.split]
-        db_handle.create_index("idx")
-        self.length = db_handle.estimated_document_count()
+        ]
+        self.meta_data = db_handle.find_one({})
+        self.category_index = self.meta_data.pop("category_index")
+        self.spatial_index = self.meta_data.pop("spatial_index")
+        self.type_index = self.meta_data.pop("type_index")
+        db_split = db_handle[self.split]
+        db_split.create_index("idx")
+        self.length = db_split.estimated_document_count()
         self.lazy_loaded = False
         self.db_handle = None
 
@@ -255,11 +298,17 @@ class AirQualityData(Dataset):
 
     @staticmethod
     def graph_transform(sample: dict):
+        if "attention_mask" not in sample or len(sample["attention_mask"]) == 0:
+            sample["time"] = torch.tensor(sample["time"], dtype=torch.float)
+            sample["attention_mask"] = sample["time"].unsqueeze(-1).T < sample[
+                "time"
+            ].unsqueeze(-1)
+            sample.pop("edge_index")
         graph_sample = ContinuousTimeGraphSample(**sample)
-        if graph_sample.attention_mask is None or len(graph_sample.attention_mask) == 0:
-            graph_sample.attention_mask = graph_sample.time.unsqueeze(
-                -1
-            ).T < graph_sample.time.unsqueeze(-1)
+        graph_sample.attention_mask = torch.logical_or(
+            graph_sample.attention_mask, graph_sample.key_padding_mask.unsqueeze(0)
+        )
+        graph_sample.node_features = torch.nan_to_num(graph_sample.node_features)
         return graph_sample
 
     def __len__(self):
@@ -272,7 +321,9 @@ class AirQualityData(Dataset):
         return sample
 
 
-if __name__ == "__main__":
+def test_datareader():
     test_obj = AirQualityData(10, Path("./data/mongo_config.yaml"))
-    print(len(test_obj))
-    print(test_obj[20])
+    assert isinstance(len(test_obj), int)
+    sample: ContinuousTimeGraphSample = test_obj[1]
+    assert not sample.node_features.isnan().any()
+    assert not sample.target.features.isnan()
