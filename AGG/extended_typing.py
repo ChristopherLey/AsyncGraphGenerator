@@ -86,9 +86,7 @@ class ContinuousTimeGraphSample(BaseModel):
     _cast_node_features: classmethod = validator(
         "node_features", allow_reuse=True, pre=True
     )(cast_2_float_tensor)
-    _cast_edge_index: classmethod = validator("edge_index", allow_reuse=True, pre=True)(
-        cast_2_long_tensor
-    )
+
     _cast_time: classmethod = validator("time", allow_reuse=True, pre=True)(
         cast_2_float_tensor
     )
@@ -109,6 +107,16 @@ class ContinuousTimeGraphSample(BaseModel):
         else:
             return TargetNode(**v)
 
+    @validator("edge_index", pre=True)
+    def create_edge_index(cls, v: Union[list, LongTensor]):
+        if isinstance(v, LongTensor):
+            entry = v
+        else:
+            entry = torch.tensor(v, dtype=torch.long)
+        if entry.shape[-2] != 2:
+            raise ValueError()
+        return entry
+
     @validator("key_padding_mask", pre=True)
     def create_key_padding_mask(
         cls, v: Union[list, BoolTensor], values: dict, field: ModelField
@@ -118,9 +126,7 @@ class ContinuousTimeGraphSample(BaseModel):
         else:
             entry = torch.tensor(v, dtype=torch.bool)
         if entry.shape != values["node_features"].shape:
-            raise ValueError(
-                f"{field.name} shape: {entry.shape} != node_features.shape {values['node_features'].shape}"
-            )
+            raise ValueError(f"edge_index shape is incorrect: {entry.shape}")
         return entry
 
     @validator("attention_mask", pre=True)

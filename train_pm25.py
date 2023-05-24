@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 from datetime import datetime
+from math import floor
 from pathlib import Path
 from pprint import pprint
 
@@ -26,7 +27,22 @@ def main():
         help="path to the config file",
         default="pm25_config.yaml",
     )
+    parser.add_argument(
+        "--resume-ckpt",
+        "-ckpt",
+        dest="ckpt",
+        metavar="FILE",
+        help="path to checkpoint",
+        default="lightning_logs/AGG-pm25-23-05_14:23:10/checkpoints/model-epoch=05-val_mse_loss=0.000235.ckpt",
+    )
     args = parser.parse_args()
+    if args.ckpt is not None:
+        ckpt_path = Path(args.ckpt)
+        args.filename = (
+            Path(f"{ckpt_path.parts[0]}/{ckpt_path.parts[1]}") / "config.yaml"
+        )
+    else:
+        ckpt_path = None
     with open(args.filename, "r") as file:
         try:
             config = yaml.safe_load(file)
@@ -36,16 +52,30 @@ def main():
     if hasattr(sys, "gettrace") and sys.gettrace() is not None:
         print("Debugging Mode")
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-        config["num_workers"] = 0
-
+        config["data_params"]["num_workers"] = 0
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
+    if (
+        "subset" in config["data_params"]
+        and config["data_params"]["subset"] is not None
+    ):
+        assert config["data_params"]["subset"] < 1.0
+        subset = floor(
+            config["data_params"]["train_length"] * config["data_params"]["subset"]
+        )
+        shuffle = True
+    else:
+        subset = None
+        shuffle = False
     train_reader = AirQualityData(
         block_size=config["data_params"]["block_size"],
         db_config=Path(config["data_params"]["db_config"]),
         version="train",
+        subset=subset,
+        shuffle=shuffle,
     )
     train_dataloader = DataLoader(
         train_reader,
-        shuffle=True,
+        shuffle=False,
         batch_size=config["data_params"]["batch_size"],
         drop_last=False,
         num_workers=config["data_params"]["num_workers"],
@@ -58,7 +88,7 @@ def main():
     )
     val_dataloader = DataLoader(
         val_reader,
-        shuffle=True,
+        shuffle=False,
         batch_size=config["data_params"]["batch_size"],
         drop_last=False,
         num_workers=config["data_params"]["num_workers"],
@@ -68,6 +98,7 @@ def main():
     config["model_params"]["num_node_types"] = len(train_reader.type_index)
     config["model_params"]["num_spatial_components"] = len(train_reader.spatial_index)
     config["model_params"]["num_categories"] = len(train_reader.category_index)
+    config["logging_params"]["scaler"] = train_reader.meta_data["scaler"]
 
     model = AGGExperiment(
         model_params=config["model_params"],
@@ -76,16 +107,20 @@ def main():
         logging_params=config["logging_params"],
     )
 
-    loss_callback = ModelCheckpoint(
+    mse_callback = ModelCheckpoint(
         monitor="val_mse_loss",
         save_top_k=4,
         mode="min",
         filename="model-{epoch:02d}-{val_mse_loss:.6f}",
     )
+    mae_callback = ModelCheckpoint(
+        monitor="val_MAE_epoch",
+        save_top_k=4,
+        mode="min",
+        filename="model-{epoch:02d}-{val_MAE_epoch:.6f}",
+    )
 
-    callbacks = [
-        loss_callback,
-    ]
+    callbacks = [mse_callback, mae_callback]
 
     version_path = f"AGG-pm25-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
 
@@ -99,8 +134,10 @@ def main():
         devices=[0],
         logger=tb_logger,
         callbacks=callbacks,
-        max_epochs=1000,
+        max_epochs=100,
         log_every_n_steps=1,
+        gradient_clip_val=1.0,
+        resume_from_checkpoint=ckpt_path,
     )
 
     pprint(config)

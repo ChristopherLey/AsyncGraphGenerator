@@ -6,55 +6,8 @@ from torch import nn
 from torch import Tensor
 
 from AGG.extended_typing import ContinuousTimeGraphSample
-
-
-class Time2Vec(nn.Module):
-    def __init__(self, embedding_dim: int):
-        super().__init__()
-        self.embedding_dim = embedding_dim
-        self.linear = nn.Linear(1, embedding_dim)
-
-    def forward(self, tau: Tensor) -> Tensor:
-        time_scaling = self.linear(tau)
-        if len(tau.shape) == 2:
-            periodic_embedding = torch.sin(time_scaling[:, 1:])
-            time_embedding = torch.cat(
-                (time_scaling[:, 0:1], periodic_embedding), dim=1
-            )
-        else:
-            periodic_embedding = torch.sin(time_scaling[:, :, 1:])
-            time_embedding = torch.cat(
-                (time_scaling[:, :, 0:1], periodic_embedding), dim=2
-            )
-        return time_embedding
-
-
-class FeedForward(nn.Module):
-    """
-    A simple linear layer followed by a non-linearity
-    """
-
-    def __init__(
-        self,
-        input_size: int,
-        hidden_dim: Optional[int] = None,
-        output_size: Optional[int] = None,
-        dropout: float = 0.5,
-    ):
-        if hidden_dim is None:
-            hidden_dim = input_size
-        if output_size is None:
-            output_size = input_size
-        super(FeedForward, self).__init__()
-        self.ff = nn.Sequential(
-            nn.Linear(input_size, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, output_size),
-            nn.Dropout(dropout),
-        )
-
-    def forward(self, x):
-        return self.ff(x)
+from AGG.utils import FeedForward
+from AGG.utils import Time2Vec
 
 
 class SelfAttentionBlock(nn.Module):
@@ -76,10 +29,13 @@ class SelfAttentionBlock(nn.Module):
             batch_first=batch_first,
         )
         self.num_heads = num_heads
-        self.norm2 = nn.LayerNorm(embed_dim)
         self.feed_forward = FeedForward(
-            embed_dim, hidden_dim=4 * embed_dim, dropout=dropout
+            input_size=embed_dim,
+            hidden_dim=embed_dim * num_heads,
+            output_size=embed_dim,
+            dropout=dropout,
         )
+        self.norm2 = nn.LayerNorm(embed_dim)
 
     def forward(
         self,
@@ -87,7 +43,6 @@ class SelfAttentionBlock(nn.Module):
         attention_mask: Tensor,
         key_padding_mask: Optional[Tensor] = None,
     ):
-        h = self.norm1(x)
         if len(attention_mask.shape) == 3:
             B, N, _ = attention_mask.shape
             multihead_mask = (
@@ -99,11 +54,11 @@ class SelfAttentionBlock(nn.Module):
         else:
             multihead_mask = attention_mask
         attention, _ = self.self_attention(
-            h, h, h, attn_mask=multihead_mask, key_padding_mask=key_padding_mask
+            x, x, x, attn_mask=multihead_mask, key_padding_mask=key_padding_mask
         )
         x = x + attention
-        x = x + self.feed_forward(self.norm2(x))
-        return x
+        x = x + self.feed_forward(self.norm1(x))
+        return self.norm2(x)
 
 
 class CrossAttentionBlock(nn.Module):
@@ -118,7 +73,7 @@ class CrossAttentionBlock(nn.Module):
         super().__init__()
         self.norm1_source = nn.LayerNorm(source_dim)  # node normalisation
         self.norm1_target = nn.LayerNorm(target_dim)  # node normalisation
-        self.self_attention = nn.MultiheadAttention(
+        self.cross_attention = nn.MultiheadAttention(
             embed_dim=target_dim,
             num_heads=num_heads,
             dropout=dropout,
@@ -128,15 +83,19 @@ class CrossAttentionBlock(nn.Module):
         )
         self.norm2 = nn.LayerNorm(target_dim)
         self.feed_forward = FeedForward(
-            target_dim, hidden_dim=4 * target_dim, dropout=dropout
+            input_size=target_dim,
+            hidden_dim=target_dim * num_heads,
+            output_size=target_dim,
+            dropout=dropout,
         )
+        self.norm3 = nn.LayerNorm(target_dim)
 
     def forward(
         self, target: Tensor, source: Tensor, key_padding_mask: Optional[Tensor] = None
     ):
         key = self.norm1_source(source)
         mask = (torch.ones((target.shape[-2], source.shape[-2])) == 0).to(key.device)
-        attention, _ = self.self_attention(
+        attention, _ = self.cross_attention(
             query=self.norm1_target(target),
             key=key,
             value=key,
@@ -145,22 +104,23 @@ class CrossAttentionBlock(nn.Module):
         )
         x = target + attention
         x = x + self.feed_forward(self.norm2(x))
-        return x
+        return self.norm3(x)
 
 
-class AsynchronousGraphGenerator(nn.Module):
+class AsynchronousGraphGeneratorTransformer(nn.Module):
     def __init__(
         self,
-        input_dim,
-        feature_dim,
-        num_heads,
-        time_embedding_dim,
-        num_node_types,
-        type_embedding_dim,
-        num_spatial_components,
-        spatial_embedding_dim,
-        num_categories,
-        categorical_embedding_dim,
+        input_dim: int,
+        feature_dim: int,
+        num_heads: int,
+        time_embedding_dim: int,
+        num_node_types: int,
+        type_embedding_dim: int,
+        num_spatial_components: int,
+        spatial_embedding_dim: int,
+        num_categories: int,
+        categorical_embedding_dim: int,
+        num_layers: int,
         dropout: float = 0.2,
     ):
         super().__init__()
@@ -179,19 +139,28 @@ class AsynchronousGraphGenerator(nn.Module):
         self.categorical_embedding = nn.Embedding(
             num_categories, categorical_embedding_dim
         )
-
+        self.agg_layers = nn.ModuleList()
+        for i in range(num_layers):
+            self.agg_layers.append(
+                SelfAttentionBlock(
+                    embed_dim=self.node_feature_dim,
+                    num_heads=num_heads,
+                    dropout=dropout,
+                    batch_first=True,
+                )
+            )
         self.cross_attention = CrossAttentionBlock(
-            self.query_dim, self.node_feature_dim, num_heads, dropout
+            target_dim=self.query_dim,
+            source_dim=self.node_feature_dim,
+            num_heads=num_heads,
+            dropout=dropout,
         )
-        self.graph_attention = SelfAttentionBlock(
-            self.node_feature_dim, num_heads, dropout
+        self.head = FeedForward(
+            input_size=self.query_dim,
+            hidden_dim=self.query_dim * num_heads,
+            output_size=input_dim,
+            dropout=dropout,
         )
-        self.cross_attention_2 = CrossAttentionBlock(
-            self.query_dim, self.node_feature_dim, num_heads, dropout
-        )
-        self.head = FeedForward(self.query_dim, output_size=input_dim, dropout=dropout)
-
-        self.mse = nn.MSELoss()
 
     def forward(
         self, graph: ContinuousTimeGraphSample, device: torch.device = "cpu"
@@ -221,12 +190,13 @@ class AsynchronousGraphGenerator(nn.Module):
         )
         key_padding_mask = graph.key_padding_mask.to(device)
         attn_mask = graph.attention_mask.to(device)
-        h = self.graph_attention(source, attn_mask, key_padding_mask)
-        y_hat = self.cross_attention(target, source, key_padding_mask)
-        y_hat = self.cross_attention_2(y_hat, h, key_padding_mask)
+        hidden = source
+        for agg_layer in self.agg_layers:
+            hidden = agg_layer(hidden, attn_mask, key_padding_mask)
+        y_hat = self.cross_attention(target, hidden, key_padding_mask)
         y_hat = self.head(y_hat)
-        loss = self.mse(y_hat.squeeze(-1), graph.target.features.to(device))
-        return loss, y_hat
+        y_hat = y_hat.squeeze(-1)
+        return y_hat
 
 
 if __name__ == "__main__":
@@ -239,7 +209,7 @@ if __name__ == "__main__":
     print(len(reader))
     loader = DataLoader(reader, batch_size=2, collate_fn=collate_graph_samples)
     graph_sample = next(iter(loader))
-    agg = AsynchronousGraphGenerator(
+    agg = AsynchronousGraphGeneratorTransformer(
         input_dim=1,
         feature_dim=10,
         num_heads=5,
@@ -250,6 +220,7 @@ if __name__ == "__main__":
         spatial_embedding_dim=10,
         num_categories=len(reader.category_index),
         categorical_embedding_dim=10,
+        num_layers=3,
         dropout=0.0,
     )
     print(agg(graph_sample))

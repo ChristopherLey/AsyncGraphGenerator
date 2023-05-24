@@ -1,7 +1,9 @@
 import copy
 from datetime import datetime
 from pathlib import Path
+from random import randint
 from typing import Dict
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -254,6 +256,8 @@ class AirQualityData(Dataset):
         db_config: Path,
         version: str = "train",
         create_preprocessing: bool = False,
+        shuffle: bool = False,
+        subset: Optional[int] = None,
     ):
         assert (
             version in self.valid_versions
@@ -286,6 +290,19 @@ class AirQualityData(Dataset):
         self.length = db_split.estimated_document_count()
         self.lazy_loaded = False
         self.db_handle = None
+        self.shuffle = shuffle
+        self.subset: Optional[int] = None
+        if isinstance(subset, int) and 0 < subset < self.length:
+            self.subset = subset
+        elif subset is not None:
+            if isinstance(subset, int):
+                Warning(
+                    f"subset key should be an integer 0 < subset < dataset_length, instead: {subset=}"
+                )
+            else:
+                Warning(
+                    f"subset key should be Union[None, int], instead type: {type(subset)} was found"
+                )
 
     def lazy_load_db(self):
         mongo_db_client = MongoClient(
@@ -297,32 +314,46 @@ class AirQualityData(Dataset):
         self.lazy_loaded = True
 
     @staticmethod
+    def adj_2_edge(adj_t: torch.Tensor):
+        edge_index = adj_t.nonzero().t().contiguous()
+        return edge_index
+
+    @staticmethod
     def graph_transform(sample: dict):
         if "attention_mask" not in sample or len(sample["attention_mask"]) == 0:
             sample["time"] = torch.tensor(sample["time"], dtype=torch.float)
             sample["attention_mask"] = sample["time"].unsqueeze(-1).T < sample[
                 "time"
             ].unsqueeze(-1)
+        if "edge_index" in sample and len(sample["edge_index"]) == 0:
             sample.pop("edge_index")
         graph_sample = ContinuousTimeGraphSample(**sample)
         graph_sample.attention_mask = torch.logical_or(
             graph_sample.attention_mask, graph_sample.key_padding_mask.unsqueeze(0)
         )
+        # adj_t = (~torch.logical_or(graph_sample.attention_mask, graph_sample.key_padding_mask.unsqueeze(1))).long()
+        # graph_sample.edge_index = self.adj_2_edge(adj_t)
         graph_sample.node_features = torch.nan_to_num(graph_sample.node_features)
         return graph_sample
 
     def __len__(self):
-        return self.length
+        if self.subset is None:
+            return self.length
+        else:
+            return self.subset
 
     def __getitem__(self, item):
         if not self.lazy_loaded:
             self.lazy_load_db()
+        if self.shuffle:
+            item = randint(0, self.length - 1)
         sample = self.graph_transform(self.db_handle.find_one({"idx": item}))
         return sample
 
 
 def test_datareader():
-    test_obj = AirQualityData(10, Path("./data/mongo_config.yaml"))
+    test_obj = AirQualityData(10, Path("./data/mongo_config.yaml"), version="test")
+    print(len(test_obj))  # 749529
     assert isinstance(len(test_obj), int)
     sample: ContinuousTimeGraphSample = test_obj[1]
     assert not sample.node_features.isnan().any()
