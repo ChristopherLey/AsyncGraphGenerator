@@ -1,0 +1,47 @@
+data_params:
+  batch_size: 2000
+  block_size: 30
+  db_config: ./Datasets/Localisation/data/mongo_config.yaml
+  num_workers: 14
+  sparsity: 0.3
+  subset: 0.3
+  test_length: 820280
+  train_length: 3276564
+logging_params:
+  name: AGG_v4
+  scaler:
+    fields:
+    - X
+    - Y
+    - Z
+    max:
+    - 5.75817346572876
+    - 3.9780967235565186
+    - 2.606104612350464
+    min:
+    - -0.27869826555252075
+    - -0.49442777037620544
+    - -2.543609142303467
+    time: 19623244.8
+    type: MinMax
+model_params:
+  attention_drop: 0.5
+  categorical_embedding_dim: 16
+  dropout: 0.2
+  feature_dim: 16
+  input_dim: 3
+  num_categories: 11
+  num_heads: 8
+  num_layers: 2
+  num_node_types: 4
+  num_spatial_components: 25
+  query_includes_categorical: true
+  spatial_embedding_dim: 16
+  time_embedding_dim: 16
+  type: Transformer
+  type_embedding_dim: 16
+optimiser_params:
+  lr: 0.0001
+  max_lr: 0.0002
+  min_lr: 1.0e-05
+  total_iters: 200
