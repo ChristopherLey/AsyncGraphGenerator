@@ -293,6 +293,8 @@ class AirQualityData(Dataset):
                 decompose_data(self.mongo_config, block_size)
             else:
                 raise Exception(f"No preprocessing data available for {block_size=}")
+        else:
+            print(f"Pre-processing found for {block_size=}")
         self.preprocessing_reference = f"block_{block_size}"
         self.split = version
         db_handle = mongo_db_client[self.mongo_config["base"]][
@@ -303,7 +305,9 @@ class AirQualityData(Dataset):
         self.spatial_index = self.meta_data.pop("spatial_index")
         self.type_index = self.meta_data.pop("type_index")
         db_split = db_handle[self.split]
+        print(f"Creating index for {db_split}...")
         db_split.create_index("idx")
+        print("Done!")
         self.length = db_split.estimated_document_count()
         self.lazy_loaded = False
         self.db_handle = None

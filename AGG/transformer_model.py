@@ -32,6 +32,7 @@ class SelfAttentionBlock(nn.Module):
         self,
         embed_dim: int,
         num_heads: int,
+        attention_drop: float = 0.2,
         dropout: float = 0.2,
         batch_first: bool = True,
     ):
@@ -40,7 +41,7 @@ class SelfAttentionBlock(nn.Module):
         self.self_attention = nn.MultiheadAttention(
             embed_dim=embed_dim,
             num_heads=num_heads,
-            dropout=dropout,
+            dropout=attention_drop,
             kdim=embed_dim,
             vdim=embed_dim,
             batch_first=batch_first,
@@ -59,7 +60,7 @@ class SelfAttentionBlock(nn.Module):
         x: Tensor,
         attention_mask: Tensor,
         key_padding_mask: Optional[Tensor] = None,
-    ):
+    ) -> Tuple[Tensor, Tensor]:
         if len(attention_mask.shape) == 3:
             B, N, _ = attention_mask.shape
             multihead_mask = (
@@ -70,12 +71,12 @@ class SelfAttentionBlock(nn.Module):
             )
         else:
             multihead_mask = attention_mask
-        attention, _ = self.self_attention(
+        attention, attention_weights = self.self_attention(
             x, x, x, attn_mask=multihead_mask, key_padding_mask=key_padding_mask
         )
         x = x + attention
         x = x + self.feed_forward(self.norm1(x))
-        return self.norm2(x)
+        return self.norm2(x), attention_weights
 
 
 class CrossAttentionBlock(nn.Module):
@@ -84,6 +85,7 @@ class CrossAttentionBlock(nn.Module):
         target_dim: int,
         source_dim: int,
         num_heads: int,
+        attention_drop: float = 0.2,
         dropout: float = 0.2,
         batch_first: bool = True,
     ):
@@ -93,7 +95,7 @@ class CrossAttentionBlock(nn.Module):
         self.cross_attention = nn.MultiheadAttention(
             embed_dim=target_dim,
             num_heads=num_heads,
-            dropout=dropout,
+            dropout=attention_drop,
             kdim=source_dim,
             vdim=source_dim,
             batch_first=batch_first,
@@ -109,10 +111,10 @@ class CrossAttentionBlock(nn.Module):
 
     def forward(
         self, target: Tensor, source: Tensor, key_padding_mask: Optional[Tensor] = None
-    ):
+    ) -> Tuple[Tensor, Tensor]:
         key = self.norm1_source(source)
         mask = (torch.ones((target.shape[-2], source.shape[-2])) == 0).to(key.device)
-        attention, _ = self.cross_attention(
+        attention, attention_weights = self.cross_attention(
             query=self.norm1_target(target),
             key=key,
             value=key,
@@ -121,7 +123,7 @@ class CrossAttentionBlock(nn.Module):
         )
         x = target + attention
         x = x + self.feed_forward(self.norm2(x))
-        return self.norm3(x)
+        return self.norm3(x), attention_weights
 
 
 class AsynchronousGraphGeneratorTransformer(nn.Module):
@@ -138,7 +140,9 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         num_categories: int,
         categorical_embedding_dim: int,
         num_layers: int,
+        attention_drop: float = 0.2,
         dropout: float = 0.2,
+        query_includes_categorical: bool = False
     ):
         super().__init__()
         self.node_feature_dim = (
@@ -149,7 +153,12 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             + categorical_embedding_dim
         )
         self.feature_projection = nn.Linear(input_dim, feature_dim)
-        self.query_dim = time_embedding_dim + type_embedding_dim + spatial_embedding_dim
+        if query_includes_categorical:
+            self.query_includes_categorical = True
+            self.query_dim = time_embedding_dim + type_embedding_dim + spatial_embedding_dim + categorical_embedding_dim
+        else:
+            self.query_includes_categorical = False
+            self.query_dim = time_embedding_dim + type_embedding_dim + spatial_embedding_dim
         self.time_embed = Time2Vec(time_embedding_dim)
         self.type_embed = nn.Embedding(num_node_types, type_embedding_dim)
         self.spatial_embed = nn.Embedding(num_spatial_components, spatial_embedding_dim)
@@ -162,7 +171,7 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
                 SelfAttentionBlock(
                     embed_dim=self.node_feature_dim,
                     num_heads=num_heads,
-                    dropout=dropout,
+                    dropout=attention_drop,
                     batch_first=True,
                 )
             )
@@ -170,7 +179,7 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             target_dim=self.query_dim,
             source_dim=self.node_feature_dim,
             num_heads=num_heads,
-            dropout=dropout,
+            dropout=attention_drop,
         )
         self.head = FeedForward(
             input_size=self.query_dim,
@@ -181,9 +190,11 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
 
     def forward(
         self, graph: ContinuousTimeGraphSample, device: torch.device = "cpu"
-    ) -> Tuple[Tensor, Tensor]:
-
-        features = self.feature_projection(graph.node_features.unsqueeze(-1).to(device))
+    ) -> Tuple[Tensor, list]:
+        if len(graph.node_features.shape) < 3:
+            features = self.feature_projection(graph.node_features.unsqueeze(-1).to(device))
+        elif len(graph.node_features.shape) == 3:
+            features = self.feature_projection(graph.node_features.to(device))
         time_encode = self.time_embed(graph.time.unsqueeze(-1).to(device))
         type_encode = self.type_embed(graph.type_index.to(device))
         spatial_encode = self.spatial_embed(graph.spatial_index.to(device))
@@ -197,23 +208,35 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             source_list,
             dim=-1,
         )
-        target = torch.cat(
-            [
+        query_list = [
                 self.time_embed(graph.target.time.unsqueeze(-1).to(device)),
                 self.type_embed(graph.target.type_index.to(device)),
                 self.spatial_embed(graph.target.spatial_index.to(device)),
-            ],
+            ]
+        if self.query_includes_categorical:
+            query_list.append(
+                self.categorical_embedding(
+                    graph.target.category_index.unsqueeze(-1).to(device)
+                )
+            )
+        target = torch.cat(
+            query_list,
             dim=-1,
         )
         key_padding_mask = graph.key_padding_mask.to(device)
         attn_mask = graph.attention_mask.to(device)
         hidden = source
+        total_attention = []
         for agg_layer in self.agg_layers:
-            hidden = agg_layer(hidden, attn_mask, key_padding_mask)
-        y_hat = self.cross_attention(target, hidden, key_padding_mask)
+            hidden, attention_weights = agg_layer(hidden, attn_mask, key_padding_mask)
+            total_attention.append(attention_weights)
+        y_hat, attention_weights = self.cross_attention(
+            target, hidden, key_padding_mask
+        )
+        total_attention.append(attention_weights)
         y_hat = self.head(y_hat)
         y_hat = y_hat.squeeze(-1)
-        return y_hat
+        return y_hat, total_attention
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 
-from AGG.experiment import AGGExperiment
+from AGG.experiments import AGGExperiment_PM25
 from AGG.extended_typing import collate_graph_samples
 from Datasets.Beijing.datareader import AirQualityData
 
@@ -50,7 +50,7 @@ def main():
         dest="ckpt",
         metavar="FILE",
         help="path to checkpoint",
-        default="lightning_logs/AGG-pm25-23-05_14:23:10/checkpoints/model-epoch=05-val_mse_loss=0.000235.ckpt",
+        default=None,
     )
     args = parser.parse_args()
     if args.ckpt is not None:
@@ -117,7 +117,7 @@ def main():
     config["model_params"]["num_categories"] = len(train_reader.category_index)
     config["logging_params"]["scaler"] = train_reader.meta_data["scaler"]
 
-    model = AGGExperiment(
+    model = AGGExperiment_PM25(
         model_params=config["model_params"],
         optimiser_params=config["optimiser_params"],
         data_params=config["data_params"],

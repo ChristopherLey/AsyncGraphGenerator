@@ -2,7 +2,7 @@ data_params:
   block_size: 10
   db_config: "./Datasets/Beijing/data/mongo_config.yaml"
   batch_size: 50
-  num_workers: 12
+  num_workers: 14
   subset: 0.3
   train_length: 749529
   test_length: 373037
@@ -16,11 +16,12 @@ model_params:
   spatial_embedding_dim: 16
   categorical_embedding_dim: 16
   num_layers: 2
+  attention_drop: 0.5
   dropout: 0.2
 optimiser_params:
-  lr: 0.001
-  max_lr: 0.001
-  min_lr: 0.0001
+  lr: 0.0001
+  max_lr: 0.0001
+  min_lr: 0.00001
   total_iters: 100
 logging_params:
   name: "AGG_v4"

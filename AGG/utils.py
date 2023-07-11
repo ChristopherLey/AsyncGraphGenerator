@@ -15,11 +15,14 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+import io
 from typing import Optional
 
 import torch
+from PIL import Image
 from torch import nn
 from torch import Tensor
+from torchvision import transforms
 
 
 class Time2Vec(nn.Module):
@@ -70,3 +73,13 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         return self.ff(x)
+
+
+def fig2img(fig):
+    """Convert a Matplotlib figure to a PIL Image and return it"""
+    T = transforms.ToTensor()
+    buf = io.BytesIO()
+    fig.savefig(buf)
+    buf.seek(0)
+    img = Image.open(buf)
+    return T(img)

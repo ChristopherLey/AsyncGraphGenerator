@@ -1,0 +1,4 @@
+data_root: /data/Dropbox/AI/Graph Networks/AsynchronousGraphGenerators/AsyncGraphGeneration/Datasets/PhysioNet_2012/data
+base: 'PhysioNet_2012'
+host: '127.0.0.1'
+port: 27017

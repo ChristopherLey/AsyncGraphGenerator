@@ -33,11 +33,11 @@ def cast_2_float_tensor(v: Union[list, FloatTensor], values: dict, field: ModelF
         entry = v
     else:
         entry = torch.tensor(v, dtype=torch.float)
-    if "node_features" in values and entry.shape != values["node_features"].shape:
+    if "node_features" in values and entry.shape[0] != values["node_features"].shape[0]:
         raise ValueError(
             f"{field.name} shape: {entry.shape} != node_features.shape {values['node_features'].shape}"
         )
-    elif "features" in entry.shape != values["features"].shape:
+    elif "features" in values and entry.shape[0] != values["features"].shape[0]:
         raise ValueError(
             f"{field.name} shape: {entry.shape} != features.shape {values['node_features'].shape}"
         )
@@ -49,11 +49,11 @@ def cast_2_long_tensor(v: Union[list, LongTensor], values: dict, field: ModelFie
         entry = v
     else:
         entry = torch.tensor(v, dtype=torch.long)
-    if "node_features" in values and entry.shape != values["node_features"].shape:
+    if "node_features" in values and entry.shape[0] != values["node_features"].shape[0]:
         raise ValueError(
             f"{field.name} shape: {entry.shape} != node_features.shape {values['node_features'].shape}"
         )
-    elif "features" in entry.shape != values["features"].shape:
+    elif "features" in values and entry.shape[0] != values["features"].shape[0]:
         raise ValueError(
             f"{field.name} shape: {entry.shape} != features.shape {values['node_features'].shape}"
         )
@@ -65,6 +65,7 @@ class TargetNode(BaseModel):
     type_index: LongTensor
     time: FloatTensor
     spatial_index: LongTensor
+    category_index: Optional[LongTensor]
 
     _cast_features: classmethod = validator("features", allow_reuse=True, pre=True)(
         cast_2_float_tensor
@@ -77,6 +78,9 @@ class TargetNode(BaseModel):
     )
     _cast_spatial_index: classmethod = validator(
         "spatial_index", allow_reuse=True, pre=True
+    )(cast_2_long_tensor)
+    _cast_category_index: classmethod = validator(
+        "category_index", allow_reuse=True, pre=True
     )(cast_2_long_tensor)
 
     class Config:
@@ -142,7 +146,7 @@ class ContinuousTimeGraphSample(BaseModel):
             entry = v
         else:
             entry = torch.tensor(v, dtype=torch.bool)
-        if entry.shape != values["node_features"].shape:
+        if entry.shape[0] != values["node_features"].shape[0]:
             raise ValueError(f"edge_index shape is incorrect: {entry.shape}")
         return entry
 
@@ -155,12 +159,12 @@ class ContinuousTimeGraphSample(BaseModel):
         else:
             entry = torch.tensor(v, dtype=torch.bool)
         if (
-            entry.shape[-1] != values["node_features"].shape[-1]
-            or entry.shape[-2] != values["node_features"].shape[-1]
+            entry.shape[-1] != values["node_features"].shape[-2]
+            or entry.shape[-2] != values["node_features"].shape[-2]
         ):
             raise ValueError(
                 f"{field.name} shape: {entry.shape} != node_features.shape "
-                f"[{values['node_features'].shape[-1]}, {values['node_features'].shape[-1]}]"
+                f"[{values['node_features'].shape[-2]}, {values['node_features'].shape[-2]}]"
             )
         return entry
 
@@ -204,6 +208,8 @@ def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
         batch_graph["edge_index"] = []
     if graph_samples[0].category_index is not None:
         batch_graph["category_index"] = []
+    if graph_samples[0].target.category_index is not None:
+        batch_graph['target']['category_index'] = []
     for sample in graph_samples:
         for key in batch_graph.keys():
             if key != "target":

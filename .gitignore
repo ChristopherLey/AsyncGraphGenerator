@@ -14,3 +14,4 @@ __pycache__*
 /lightning_logs/*/checkpoints
 /lightning_logs/*/hparams.yaml
 lightning_logs/*/events.*
+/Datasets/nntimeseries/
