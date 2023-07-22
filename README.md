@@ -29,19 +29,19 @@ called `pm25_config.yaml`
 <div style="display: flex; flex-direction: column">
     <div style="display: flex">
         <div style="padding-right: 10px">
-            <img src="AGG_diagrams/time_series_matrix.png" width="400" title="Time Series Matrix" alt="Matrix time-series representation">
+            <img src="AGG_diagrams/time_series_matrix.png" width="200" title="Time Series Matrix" alt="Matrix time-series representation">
         </div>
         <div style="padding-right: 10px">
-            <img src="AGG_diagrams/time_series_graph.png" width="400" title="AGG step 5" alt="A diagram of an Asynchronous Graph">
+            <img src="AGG_diagrams/time_series_graph.png" width="200" title="AGG step 5" alt="A diagram of an Asynchronous Graph">
         </div>
         <div>
-            <img src="AGG_diagrams/time_series_inputation.png" width="400" title="AGG step 5" alt="A diagram of an Asynchronous Graph">
+            <img src="AGG_diagrams/time_series_inputation.png" width="200" title="AGG step 5" alt="A diagram of an Asynchronous Graph">
         </div>
     </div>
     <div style="display: flex">
-        <p style="width: 400px; padding-right: 10px">(a) Matrix time-series representation</p>
-        <p style="width: 400px; padding-right: 10px">(b) An asynchronous directed graph representing the sparse time series data with minimal assumptions other than the causal nature of the samples.</p>
-        <p style="width: 400px">(c) New nodes can be generated arbitrarily using the encoded features of the asynchronous graph</p>
+        <p style="width: 200px; padding-right: 10px">(a) Matrix time-series representation</p>
+        <p style="width: 200px; padding-right: 10px">(b) An asynchronous directed graph representing the sparse time series data with minimal assumptions other than the causal nature of the samples.</p>
+        <p style="width: 200px">(c) New nodes can be generated arbitrarily using the encoded features of the asynchronous graph</p>
     </div>
 </div>
 
