@@ -19,10 +19,10 @@ To train the AGG using the activity dataset you can run
 ~~~console
 python train_activity.py -c ./activity_config.yaml
 ~~~
-all hyper-parameters should be changed in the corresponding `activity_config.yaml`
+all hyperparameters should be changed in the corresponding `activity_config.yaml`
 schema file.
 
-Similarly for the __PM2.5__ dataset (Beijing) with the run file names `train_pm25.py` and the corresponding config file
+Similarly, for the __PM2.5__ dataset (Beijing) with the run file names `train_pm25.py` and the corresponding config file
 called `pm25_config.yaml`
 
 ## Conceptual Figures
