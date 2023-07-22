@@ -28,9 +28,9 @@ called `pm25_config.yaml`
 ## Conceptual Figures
 <table>
     <tr>
-        <td> <img src="AGG_diagrams/time_series_matrix.png" height="200" title="Time Series Matrix"></td>
-        <td><img src="AGG_diagrams/time_series_graph.png" height="200" title="Time series graph representation" ></td>
-        <td><img src="AGG_diagrams/time_series_inputation.png" height="200" title="Node generation"></td>
+        <td> <img src="AGG_diagrams/time_series_matrix.png" width="200" title="Time Series Matrix"></td>
+        <td><img src="AGG_diagrams/time_series_graph.png" width="200" title="Time series graph representation" ></td>
+        <td><img src="AGG_diagrams/time_series_inputation.png" width="200" title="Node generation"></td>
     </tr> 
     <tr>
         <td><p>(a) Matrix time-series representation</p></td>
