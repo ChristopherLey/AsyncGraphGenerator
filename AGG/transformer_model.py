@@ -142,7 +142,7 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         num_layers: int,
         attention_drop: float = 0.2,
         dropout: float = 0.2,
-        query_includes_categorical: bool = False
+        query_includes_categorical: bool = False,
     ):
         super().__init__()
         self.node_feature_dim = (
@@ -155,10 +155,17 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         self.feature_projection = nn.Linear(input_dim, feature_dim)
         if query_includes_categorical:
             self.query_includes_categorical = True
-            self.query_dim = time_embedding_dim + type_embedding_dim + spatial_embedding_dim + categorical_embedding_dim
+            self.query_dim = (
+                time_embedding_dim
+                + type_embedding_dim
+                + spatial_embedding_dim
+                + categorical_embedding_dim
+            )
         else:
             self.query_includes_categorical = False
-            self.query_dim = time_embedding_dim + type_embedding_dim + spatial_embedding_dim
+            self.query_dim = (
+                time_embedding_dim + type_embedding_dim + spatial_embedding_dim
+            )
         self.time_embed = Time2Vec(time_embedding_dim)
         self.type_embed = nn.Embedding(num_node_types, type_embedding_dim)
         self.spatial_embed = nn.Embedding(num_spatial_components, spatial_embedding_dim)
@@ -192,8 +199,10 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         self, graph: ContinuousTimeGraphSample, device: torch.device = "cpu"
     ) -> Tuple[Tensor, list]:
         if len(graph.node_features.shape) < 3:
-            features = self.feature_projection(graph.node_features.unsqueeze(-1).to(device))
-        elif len(graph.node_features.shape) == 3:
+            features = self.feature_projection(
+                graph.node_features.unsqueeze(-1).to(device)
+            )
+        elif len(graph.node_features.shape) >= 3:
             features = self.feature_projection(graph.node_features.to(device))
         time_encode = self.time_embed(graph.time.unsqueeze(-1).to(device))
         type_encode = self.type_embed(graph.type_index.to(device))
@@ -209,11 +218,13 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             dim=-1,
         )
         query_list = [
-                self.time_embed(graph.target.time.unsqueeze(-1).to(device)),
-                self.type_embed(graph.target.type_index.to(device)),
-                self.spatial_embed(graph.target.spatial_index.to(device)),
-            ]
-        if self.query_includes_categorical:
+            self.time_embed(graph.target.time.unsqueeze(-1).to(device)),
+            self.type_embed(graph.target.type_index.to(device)),
+            self.spatial_embed(graph.target.spatial_index.to(device)),
+        ]
+        if self.query_includes_categorical and isinstance(
+            graph.target.category_index, torch.LongTensor
+        ):
             query_list.append(
                 self.categorical_embedding(
                     graph.target.category_index.unsqueeze(-1).to(device)

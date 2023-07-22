@@ -3,6 +3,7 @@ from torch.utils.data import Dataset
 
 from AGG.extended_typing import ContinuousTimeGraphSample
 
+
 class GraphDataset(Dataset):
     @staticmethod
     def adj_2_edge(adj_t: torch.Tensor):

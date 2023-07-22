@@ -84,10 +84,8 @@ def main():
             version="train",
         )
         train_length = len(train_reader)
-        subset = floor(
-            train_length * config["data_params"]["subset"]
-        )
-        print(f'Training with a subset of {subset}/{train_length}')
+        subset = floor(train_length * config["data_params"]["subset"])
+        print(f"Training with a subset of {subset}/{train_length}")
         shuffle = True
     else:
         subset = None

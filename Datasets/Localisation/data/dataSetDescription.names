@@ -1,22 +1,22 @@
 1. Title: Localization Data for Posture Reconstruction
 2. Sources:
-	- Creators: Mitja Lustrek (mitja.lustrek@ijs.si), Bostjan Kaluza (bostjan.kaluza@ijs.si), Rok Piltaver (rok.piltaver@ijs.si), Jana Krivec (jana.krivec@ijs.si), Vedrana Vidulin (vedrana.vidulin@ijs.si)  
+	- Creators: Mitja Lustrek (mitja.lustrek@ijs.si), Bostjan Kaluza (bostjan.kaluza@ijs.si), Rok Piltaver (rok.piltaver@ijs.si), Jana Krivec (jana.krivec@ijs.si), Vedrana Vidulin (vedrana.vidulin@ijs.si)
 		- Jozef Stefan Institute, Jamova cesta 39, 1000 Ljubljana, Slovenija
 	- Donor: Bozidara Cvetkovic (boza.cvetkovic@ijs.si)
     - Date received: October, 2010
 3. Past Usage:
-	- B. Kaluza, V. Mirchevska, E. Dovgan, M. Lustrek, M. Gams, An Agent-based Approach to Care in Independent Living, International Joint Conference on Ambient Intelligence (AmI-10), Malaga, Spain, In press 
+	- B. Kaluza, V. Mirchevska, E. Dovgan, M. Lustrek, M. Gams, An Agent-based Approach to Care in Independent Living, International Joint Conference on Ambient Intelligence (AmI-10), Malaga, Spain, In press
 		- Results: detecting falls : Machine learning agents: 72%, Expert-knowledge agents: 88%, Meta-prediction agents: 91.3%
-		
+
 4. Relevant Information Paragraph:
-   People used for recording of the data were wearing four tags (ankle left, ankle right, belt and chest). 
+   People used for recording of the data were wearing four tags (ankle left, ankle right, belt and chest).
    Each instance is a localization data for one of the tags. The tag can be identified by one of the attributes.
-   
+
 5. Number of Instances: 164860
 
-6. Number of Attributes: 8 
+6. Number of Attributes: 8
 
-7. For Each Attribute: 
+7. For Each Attribute:
 
    Instance example: A01,020-000-033-111,633790226057226795,27.05.2009 14:03:25:723,4.292500972747803,2.0738532543182373,1.36650812625885,walking
 
@@ -28,19 +28,19 @@
 	  - CHEST = 020-000-033-111
       - BELT = 020-000-032-221
    3) timestamp (Numeric) all unique
-   4) date FORMAT = dd.MM.yyyy HH:mm:ss:SSS (Date) 
+   4) date FORMAT = dd.MM.yyyy HH:mm:ss:SSS (Date)
    5) x coordinate of the tag (Numeric)
    6) y coordinate of the tag (Numeric)
    7) z coordinate of the tag (Numeric)
    8) activity  {walking,falling,'lying down',lying,'sitting down',sitting,'standing up from lying','on all fours','sitting on the ground','standing up from sitting','standing up from sitting on the ground'} (Nominal)
-   
+
 8. Missing Attribute Values: none
 
 9. Class Distribution:
 	CLASS											NUMBER OF INSTANCES PER CLASS
 	- walking										32710
 	- falling										2973
-	-'lying down'									6168	
+	-'lying down'									6168
 	- lying											54480
 	- 'sitting down'								1706
 	- sitting										27244

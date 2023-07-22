@@ -209,7 +209,7 @@ def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
     if graph_samples[0].category_index is not None:
         batch_graph["category_index"] = []
     if graph_samples[0].target.category_index is not None:
-        batch_graph['target']['category_index'] = []
+        batch_graph["target"]["category_index"] = []
     for sample in graph_samples:
         for key in batch_graph.keys():
             if key != "target":

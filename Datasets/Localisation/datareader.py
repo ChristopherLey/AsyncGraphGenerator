@@ -16,18 +16,16 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 import copy
-
-import yaml
 from datetime import datetime
-from pymongo import MongoClient
-from sklearn.preprocessing import MinMaxScaler
-import numpy as np
+from pathlib import Path
 from random import randint
 from typing import Dict
-from pathlib import Path
 from typing import Optional
 
-from torch.utils.data import Dataset
+import numpy as np
+import yaml
+from pymongo import MongoClient
+from sklearn.preprocessing import MinMaxScaler
 from tqdm import tqdm
 from tqdm import trange
 
@@ -65,20 +63,20 @@ tag_identifiers = [
     "010-000-024-033",
     "020-000-033-111",
     "020-000-032-221",
-    "010-000-030-096"
+    "010-000-030-096",
 ]
 activity = [
-    'walking',
-    'falling',
-    'lying down',
-    'lying',
-    'sitting down',
-    'sitting',
-    'standing up from lying',
-    'on all fours',
-    'sitting on the ground',
-    'standing up from sitting',
-    'standing up from sitting on the ground'
+    "walking",
+    "falling",
+    "lying down",
+    "lying",
+    "sitting down",
+    "sitting",
+    "standing up from lying",
+    "on all fours",
+    "sitting on the ground",
+    "standing up from sitting",
+    "standing up from sitting on the ground",
 ]
 target_template: Dict[str, list] = {
     "features": [],
@@ -98,12 +96,11 @@ graph_template: dict = {
     "category_index": [],
 }
 
+
 def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5):
     with open(config["data_root"], "r") as data_file:
         data_list = data_file.readlines()
-    mongo_db_client = MongoClient(
-        host=config["host"], port=config["port"]
-    )
+    mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
     assert 0 < sparsity < 1.0
     block_name = f"block_{block_size:02d}_{100*sparsity}%"
@@ -116,47 +113,45 @@ def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5):
     else:
         if len(existing_collections) > 0:
             return
-    parsed_data = {}
+    parsed_data: dict[str, dict] = {}
     for key in sequence_keys:
         parsed_data[key] = {
-            'type_index': [],
-            'time': [],
-            'datetime': [],
-            'node_features': [],
-            'category_index': []
+            "type_index": [],
+            "time": [],
+            "datetime": [],
+            "node_features": [],
+            "category_index": [],
         }
     feature_scaling = []
     for entry in data_list:
-        data = (entry.split('\n')[0]).split(',')
-        assert data[0] in sequence_keys, f'{data[0]} is an unknown sequence'
+        data = (entry.split("\n")[0]).split(",")
+        assert data[0] in sequence_keys, f"{data[0]} is an unknown sequence"
         key = data[0]
-        parsed_data[key]['type_index'].append(tag_identifiers.index(data[1]))
-        parsed_data[key]['time'].append(float(data[2]))
-        parsed_data[key]['datetime'].append(datetime.strptime(data[3], "%d.%m.%Y %H:%M:%S:%f"))
-        features = [
-            float(data[4]),
-            float(data[5]),
-            float(data[6])
-        ]
-        parsed_data[key]['node_features'].append(features)
+        parsed_data[key]["type_index"].append(tag_identifiers.index(data[1]))
+        parsed_data[key]["time"].append(float(data[2]))
+        parsed_data[key]["datetime"].append(
+            datetime.strptime(data[3], "%d.%m.%Y %H:%M:%S:%f")
+        )
+        features = [float(data[4]), float(data[5]), float(data[6])]
+        parsed_data[key]["node_features"].append(features)
         feature_scaling.append(features)
-        parsed_data[key]['category_index'].append(activity.index(data[7]))
+        parsed_data[key]["category_index"].append(activity.index(data[7]))
     scaler = MinMaxScaler()
     scaler.fit_transform(feature_scaling)
 
     block_data = db[block_name]
-    test_block = block_data['test']
-    train_block = block_data['train']
+    test_block = block_data["test"]
+    train_block = block_data["train"]
     meta = {
         "type": block_size,
         "scaler": {
             "type": "MinMax",
-            "fields": ['X', 'Y', "Z"],
+            "fields": ["X", "Y", "Z"],
             "min": scaler.data_min_.tolist(),
             "max": scaler.data_max_.tolist(),
-            "time": 32705408.0*sparsity/0.5
+            "time": 32705408.0 * sparsity / 0.5,
         },
-        'sparsity': sparsity,
+        "sparsity": sparsity,
         "type_index": tag_identifiers,
         "spatial_index": sequence_keys,
         "category_index": activity,
@@ -165,23 +160,27 @@ def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5):
     indexes = {}
     for key, value in parsed_data.items():
         removed = np.random.choice(
-            len(parsed_data[key]['time']),
-            size=int(np.floor(len(parsed_data[key]['time'])*sparsity)),
-            replace=False
+            len(parsed_data[key]["time"]),
+            size=int(np.floor(len(parsed_data[key]["time"]) * sparsity)),
+            replace=False,
         )
         removed.sort()
-        remainder_bool = np.array([i not in removed for i in range(len(parsed_data[key]['time']))])
-        remainder = np.arange(len(parsed_data[key]['time']))[remainder_bool]
-        test_index = np.random.choice(removed.shape[0], size=removed.shape[0]//5, replace=False)
+        remainder_bool = np.array(
+            [i not in removed for i in range(len(parsed_data[key]["time"]))]
+        )
+        remainder = np.arange(len(parsed_data[key]["time"]))[remainder_bool]
+        test_index = np.random.choice(
+            removed.shape[0], size=removed.shape[0] // 5, replace=False
+        )
         test_index.sort()
         test = removed[test_index]
         train_index = np.array([i not in test_index for i in range(removed.shape[0])])
         train = removed[train_index]
         indexes[key] = {
-            'removed': removed,
-            'remainder': remainder,
-            'train': train,
-            'test': test
+            "removed": removed,
+            "remainder": remainder,
+            "train": train,
+            "test": test,
         }
         for input_field in value.keys():
             parsed_data[key][input_field] = np.array(parsed_data[key][input_field])
@@ -191,70 +190,104 @@ def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5):
     for key in tqdm(parsed_data.keys()):
         data_source = parsed_data[key]
         index = indexes[key]
-        for n in trange(0, index['remainder'].shape[0]-block_size):
-            input_index = index['remainder'][n:n+block_size]
-            time = data_source['time'][input_index]
-            tau = (time.max() - time)/meta['scaler']['time']
+        for n in trange(0, index["remainder"].shape[0] - block_size):
+            input_index = index["remainder"][n : n + block_size]
+            time = data_source["time"][input_index]
+            tau = (time.max() - time) / meta["scaler"]["time"]
             if tau.max() > max_time:
                 max_time = tau.max()
             graph = copy.deepcopy(graph_template)
-            graph['node_features'] = data_source['node_features'][input_index].tolist()
-            graph["key_padding_mask"] = (np.zeros_like(data_source['type_index'][input_index]) != 0).tolist()
-            graph['time'] = tau.tolist()
-            graph['type_index'] = data_source['type_index'][input_index].tolist()
-            graph['spatial_index'] = [sequence_keys.index(key)]*block_size
-            graph['category_index'] = data_source['category_index'][input_index].tolist()
-            train_mask = (index['train'] > input_index.min()) & (index['train'] < input_index.max())
-            test_mask = (index['test'] > input_index.min()) & (index['test'] < input_index.max())
-            test_set = index['test'][test_mask]
+            graph["node_features"] = data_source["node_features"][input_index].tolist()
+            graph["key_padding_mask"] = (
+                np.zeros_like(data_source["type_index"][input_index]) != 0
+            ).tolist()
+            graph["time"] = tau.tolist()
+            graph["type_index"] = data_source["type_index"][input_index].tolist()
+            graph["spatial_index"] = [sequence_keys.index(key)] * block_size
+            graph["category_index"] = data_source["category_index"][
+                input_index
+            ].tolist()
+            train_mask = (index["train"] > input_index.min()) & (
+                index["train"] < input_index.max()
+            )
+            test_mask = (index["test"] > input_index.min()) & (
+                index["test"] < input_index.max()
+            )
+            test_set = index["test"][test_mask]
             write_data = []
             for i in range(test_set.shape[0]):
                 graph_sample = copy.deepcopy(graph)
                 target = copy.deepcopy(target_template)
-                target['features'] = [data_source['node_features'][test_set[i]].tolist(), ]
-                target['type_index'] = [data_source['type_index'][test_set[i]].tolist(), ]
-                target['spatial_index'] = [sequence_keys.index(key), ]
-                target['category_index'] = [data_source['category_index'][test_set[i]].tolist(), ]
-                target['time'] = [((time.max() - data_source['time'][test_set[i]])/meta['scaler']['time']).tolist(), ]
-                graph_sample['target'] = target
-                graph_sample['idx'] = test_sample_count
+                target["features"] = [
+                    data_source["node_features"][test_set[i]].tolist(),
+                ]
+                target["type_index"] = [
+                    data_source["type_index"][test_set[i]].tolist(),
+                ]
+                target["spatial_index"] = [
+                    sequence_keys.index(key),
+                ]
+                target["category_index"] = [
+                    data_source["category_index"][test_set[i]].tolist(),
+                ]
+                target["time"] = [
+                    (
+                        (time.max() - data_source["time"][test_set[i]])
+                        / meta["scaler"]["time"]
+                    ).tolist(),
+                ]
+                graph_sample["target"] = target
+                graph_sample["idx"] = test_sample_count
                 test_sample_count += 1
                 write_data.append(graph_sample)
             if len(write_data) > 0:
                 test_block.insert_many(write_data)
-            train_set = index['train'][train_mask]
+            train_set = index["train"][train_mask]
             write_data = []
             for i in range(train_set.shape[0]):
                 graph_sample = copy.deepcopy(graph)
                 target = copy.deepcopy(target_template)
-                target['features'] = [data_source['node_features'][train_set[i]].tolist(), ]
-                target['type_index'] = [data_source['type_index'][train_set[i]].tolist(), ]
-                target['spatial_index'] = [sequence_keys.index(key), ]
-                target['category_index'] = [data_source['category_index'][train_set[i]].tolist(), ]
-                target['time'] = [((time.max() - data_source['time'][train_set[i]])/meta['scaler']['time']).tolist(), ]
-                graph_sample['target'] = target
-                graph_sample['idx'] = train_sample_count
+                target["features"] = [
+                    data_source["node_features"][train_set[i]].tolist(),
+                ]
+                target["type_index"] = [
+                    data_source["type_index"][train_set[i]].tolist(),
+                ]
+                target["spatial_index"] = [
+                    sequence_keys.index(key),
+                ]
+                target["category_index"] = [
+                    data_source["category_index"][train_set[i]].tolist(),
+                ]
+                target["time"] = [
+                    (
+                        (time.max() - data_source["time"][train_set[i]])
+                        / meta["scaler"]["time"]
+                    ).tolist(),
+                ]
+                graph_sample["target"] = target
+                graph_sample["idx"] = train_sample_count
                 train_sample_count += 1
                 write_data.append(graph_sample)
             if len(write_data) > 0:
                 train_block.insert_many(write_data)
 
+
 class ActivityData(GraphDataset):
     valid_versions = ["train", "test"]
 
     def __init__(
-            self,
-            block_size: int,
-            sparsity: float,
-            db_config: Path,
-            version: str = "train",
-            create_preprocessing: bool = False,
-            shuffle: bool = False,
-            subset: Optional[int] = None,
-
+        self,
+        block_size: int,
+        sparsity: float,
+        db_config: Path,
+        version: str = "train",
+        create_preprocessing: bool = False,
+        shuffle: bool = False,
+        subset: Optional[int] = None,
     ):
         assert (
-                version in self.valid_versions
+            version in self.valid_versions
         ), f"{version=} is not a valid version, valid version include {self.valid_versions}"
         with open(db_config, "r") as f:
             self.mongo_config: dict = yaml.safe_load(f)
@@ -268,7 +301,12 @@ class ActivityData(GraphDataset):
                 print(
                     f"No pre-processing for {block_name=}, this could take a while..."
                 )
-                decompose_data(self.mongo_config, block_size=block_size, sparsity=sparsity, exists_ok=False)
+                decompose_data(
+                    self.mongo_config,
+                    block_size=block_size,
+                    sparsity=sparsity,
+                    exists_ok=False,
+                )
             else:
                 raise Exception(f"No preprocessing data available for {block_name=}")
         else:
@@ -326,12 +364,13 @@ class ActivityData(GraphDataset):
         sample = self.graph_transform(self.db_handle.find_one({"idx": item}))
         return sample
 
+
 def test_datareader():
     test_obj = ActivityData(
         block_size=30,
         sparsity=0.9,
         db_config=Path("./data/mongo_config.yaml"),
-        version='test'
+        version="test",
     )
     print(len(test_obj))  # 1895393
     assert isinstance(len(test_obj), int)

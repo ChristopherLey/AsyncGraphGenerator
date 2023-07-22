@@ -15,24 +15,10 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-import copy
-from datetime import datetime
 from pathlib import Path
-from random import randint
-from typing import Dict
-from typing import Optional
 
-import numpy as np
 import pandas as pd
-import torch
 import yaml
-from pymongo import MongoClient
-from sklearn.preprocessing import MinMaxScaler
-from torch.utils.data import Dataset
-from tqdm import tqdm
-from tqdm import trange
-
-from AGG.extended_typing import ContinuousTimeGraphSample
 
 types = [
     "Age",
@@ -83,12 +69,12 @@ unique_ICUType = [1, 2, 3, 4]
 def decompose_physionet_data(config: dict, exists_ok: bool = True):
     root_path = Path(config["data_root"])
     train_set_input = root_path / "set-a"
-    val_set_input = root_path / "set-b"
-    test_set_input = root_path / "set-c"
-    train_set_output = root_path / "Outcomes" / "Outcomes-a.txt"
-    val_set_output = root_path / "Outcomes" / "Outcomes-b.txt"
-    test_set_output = root_path / "Outcomes" / "Outcomes-c.txt"
-    train_output_db = pd.read_csv(train_set_output)
+    # val_set_input = root_path / "set-b"
+    # test_set_input = root_path / "set-c"
+    # train_set_output = root_path / "Outcomes" / "Outcomes-a.txt"
+    # val_set_output = root_path / "Outcomes" / "Outcomes-b.txt"
+    # test_set_output = root_path / "Outcomes" / "Outcomes-c.txt"
+    # train_output_db = pd.read_csv(train_set_output)
     for entry in train_set_input.iterdir():
         entry_db = pd.read_csv(entry)
         entry_db.iloc[0]

@@ -28,7 +28,6 @@ from torch.optim import Adam
 from torchmetrics import MeanAbsoluteError
 from torchmetrics import MeanSquaredError
 from torchmetrics import R2Score
-from torchvision.transforms.functional import to_pil_image
 
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
@@ -192,6 +191,8 @@ class AGGExperiment_PM25(pl.LightningModule):
         )
         # fmt: off
         return [optimiser, ], [lr_scheduler, ]
+        # fmt: on
+
 
 class AGGExperiment_Activity(pl.LightningModule):
     def __init__(
@@ -285,7 +286,8 @@ class AGGExperiment_Activity(pl.LightningModule):
         #     )
         # average_final_attention = torch.mean(attention_list[-1], dim=0).to("cpu")
         # self.logger.experiment.add_image(
-        #     "mean_final_attention_val", to_pil_image(average_final_attention), global_step=self.global_step, close=True
+        #     "mean_final_attention_val",
+        #     to_pil_image(average_final_attention), global_step=self.global_step, close=True
         # )
         return loss.detach().to("cpu"), y_hat.detach().to("cpu")
 
@@ -301,3 +303,4 @@ class AGGExperiment_Activity(pl.LightningModule):
         )
         # fmt: off
         return [optimiser, ], [lr_scheduler, ]
+        # fmt: on
