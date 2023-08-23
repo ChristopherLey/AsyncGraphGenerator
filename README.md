@@ -25,7 +25,7 @@ schema file.
 Similarly, for the __PM2.5__ dataset (Beijing) with the run file names `train_pm25.py` and the corresponding config file
 called `pm25_config.yaml`
 
-## Conceptual Figures
+## AGG Conceptually
 <table>
     <tr>
         <td> <img src="AGG_diagrams/time_series_matrix.png" width="200" title="Time Series Matrix"></td>

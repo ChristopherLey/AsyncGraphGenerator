@@ -19,6 +19,7 @@ from typing import Optional
 from typing import Tuple
 
 import torch
+import yaml
 from torch import nn
 from torch import Tensor
 
@@ -74,8 +75,11 @@ class SelfAttentionBlock(nn.Module):
         attention, attention_weights = self.self_attention(
             x, x, x, attn_mask=multihead_mask, key_padding_mask=key_padding_mask
         )
+        attention = torch.nan_to_num(attention)
+        attention_weights = torch.nan_to_num(attention_weights)
         x = x + attention
         x = x + self.feed_forward(self.norm1(x))
+        x = self.norm2(x)
         return self.norm2(x), attention_weights
 
 
@@ -121,9 +125,12 @@ class CrossAttentionBlock(nn.Module):
             attn_mask=mask,
             key_padding_mask=key_padding_mask,
         )
+        attention = torch.nan_to_num(attention)
+        attention_weights = torch.nan_to_num(attention_weights)
         x = target + attention
         x = x + self.feed_forward(self.norm2(x))
-        return self.norm3(x), attention_weights
+        x = self.norm3(x)
+        return x, attention_weights
 
 
 class AsynchronousGraphGeneratorTransformer(nn.Module):
@@ -143,6 +150,7 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         attention_drop: float = 0.2,
         dropout: float = 0.2,
         query_includes_categorical: bool = False,
+        categorical_input: Optional[int] = None
     ):
         super().__init__()
         self.node_feature_dim = (
@@ -169,9 +177,15 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         self.time_embed = Time2Vec(time_embedding_dim)
         self.type_embed = nn.Embedding(num_node_types, type_embedding_dim)
         self.spatial_embed = nn.Embedding(num_spatial_components, spatial_embedding_dim)
-        self.categorical_embedding = nn.Embedding(
-            num_categories, categorical_embedding_dim
-        )
+        self.num_categorical = num_categories
+        if self.query_includes_categorical:
+            if num_categories == -1:
+                self.categorical_embedding = nn.Linear(categorical_input, categorical_embedding_dim)
+            else:
+                self.categorical_embedding = nn.Embedding(
+                    num_categories, categorical_embedding_dim
+                )
+
         self.agg_layers = nn.ModuleList()
         for i in range(num_layers):
             self.agg_layers.append(
@@ -223,13 +237,13 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             self.spatial_embed(graph.target.spatial_index.to(device)),
         ]
         if self.query_includes_categorical and isinstance(
-            graph.target.category_index, torch.LongTensor
+            graph.target.category_index, (torch.LongTensor, torch.FloatTensor)
         ):
-            query_list.append(
-                self.categorical_embedding(
-                    graph.target.category_index.unsqueeze(-1).to(device)
-                )
-            )
+            if len(graph.target.category_index.shape) == 1:
+                category = self.categorical_embedding(graph.target.category_index.unsqueeze(-1).to(device))
+            else:
+                category = self.categorical_embedding(graph.target.category_index.unsqueeze(-2).to(device))
+            query_list.append(category)
         target = torch.cat(
             query_list,
             dim=-1,
@@ -237,6 +251,10 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         key_padding_mask = graph.key_padding_mask.to(device)
         attn_mask = graph.attention_mask.to(device)
         hidden = source
+        if torch.any(torch.isnan(source)):
+            print(source)
+        if torch.any(torch.isnan(target)):
+            print(target)
         total_attention = []
         for agg_layer in self.agg_layers:
             hidden, attention_weights = agg_layer(hidden, attn_mask, key_padding_mask)
@@ -251,27 +269,147 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
 
 
 if __name__ == "__main__":
-    from Datasets.Beijing.datareader import AirQualityData
+    from Datasets.Beijing.datareader import AirQualityDataRegression
     from pathlib import Path
     from torch.utils.data import DataLoader
     from AGG.extended_typing import collate_graph_samples
-
-    reader = AirQualityData(10, Path("../Datasets/Beijing/data/mongo_config.yaml"))
-    print(len(reader))
-    loader = DataLoader(reader, batch_size=2, collate_fn=collate_graph_samples)
-    graph_sample = next(iter(loader))
+    from torch import tensor
+    example_nan = {'category_index': tensor([[0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.0000, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000],
+        [0.9067, 0.0000, 0.0000]]),
+                   'attention_mask': tensor([[ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False,  True,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False,  True,  True,
+          True,  True,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False,  True,  True,  True,  True,  True,  True,  True,  True],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False, False, False, False, False, False, False, False, False],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False, False, False, False, False, False, False, False, False],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False, False, False, False, False, False, False, False, False],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False, False, False, False, False, False, False, False, False],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False, False, False, False, False, False, False, False, False],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False, False, False, False, False, False, False, False, False],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False, False, False, False, False, False, False, False, False],
+        [ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+          True, False, False, False, False, False, False, False, False, False,
+         False, False, False, False, False, False, False, False, False, False]]), 'key_padding_mask': tensor([ True,  True,  True,  True,  True,  True,  True,  True,  True,  True,
+         True, False, False, False, False, False, False, False, False, False,
+        False, False, False, False, False, False, False, False, False, False]), 'node_features': tensor([0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0048, 0.2267, 0.3265, 0.4434, 0.2348, 0.5610, 0.2773,
+        0.3397, 0.4681, 0.4454, 0.0398, 0.1866, 0.0318, 0.1421, 0.4255, 0.2794,
+        0.1739, 0.5854, 0.0411]), 'spatial_index': tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+        3, 3, 3, 3, 3, 3]), 'time': tensor([1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000, 1.0000,
+        1.0000, 1.0000, 0.6434, 0.6434, 0.6434, 0.6434, 0.6434, 0.6434, 0.6250,
+        0.4792, 0.4792, 0.4792, 0.4792, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0000, 0.0000, 0.0000]), 'type_index': tensor([38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 30, 19, 22, 23, 24, 25,  7,
+        17, 20, 21, 26, 17, 18, 19, 20, 23, 24, 25, 26]), 'target': {'category_index': tensor([0.9067, 0.0000, 0.0000]), 'features': tensor([0.0409]), 'spatial_index': tensor([3]), 'time': tensor([0.4792]), 'type_index': tensor([18])}}
+    config = Path("/data/Dropbox/AI/Graph Networks/AGG/AsyncGraphGeneration/icu_config.yaml")
+    with open(config, 'r') as f:
+        config = yaml.safe_load(f)
+    config['model_params'].pop('type')
+    graph_sample = ContinuousTimeGraphSample(**example_nan)
     agg = AsynchronousGraphGeneratorTransformer(
-        input_dim=1,
-        feature_dim=10,
-        num_heads=5,
-        time_embedding_dim=10,
-        num_node_types=len(reader.type_index),
-        type_embedding_dim=10,
-        num_spatial_components=len(reader.spatial_index),
-        spatial_embedding_dim=10,
-        num_categories=len(reader.category_index),
-        categorical_embedding_dim=10,
-        num_layers=3,
-        dropout=0.0,
+        **{'input_dim': 1, 'feature_dim': 16, 'num_heads': 8, 'time_embedding_dim': 16, 'type_embedding_dim': 16, 'spatial_embedding_dim': 16, 'categorical_embedding_dim': 16, 'categorical_input': 3, 'num_layers': 2, 'attention_drop': 0.2, 'dropout': 0.2, 'query_includes_categorical': True, 'num_node_types': 39, 'num_spatial_components': 5, 'num_categories': -1}
     )
     print(agg(graph_sample))

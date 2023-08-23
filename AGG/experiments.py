@@ -17,7 +17,7 @@
 """
 from copy import deepcopy
 from typing import Tuple
-
+from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
@@ -28,6 +28,10 @@ from torch.optim import Adam
 from torchmetrics import MeanAbsoluteError
 from torchmetrics import MeanSquaredError
 from torchmetrics import R2Score
+from torchvision import transforms
+from torchvision.utils import save_image
+import io
+from PIL import Image
 
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
@@ -290,6 +294,278 @@ class AGGExperiment_Activity(pl.LightningModule):
         #     to_pil_image(average_final_attention), global_step=self.global_step, close=True
         # )
         return loss.detach().to("cpu"), y_hat.detach().to("cpu")
+
+
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimiser = Adam(self.agg.parameters(), lr=self.optimiser_params["lr"])
+        lr_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer=optimiser,
+            start_factor=1.0,
+            end_factor=(
+                self.optimiser_params["min_lr"] / self.optimiser_params["max_lr"]
+            ),
+            total_iters=self.optimiser_params["total_iters"],
+        )
+        # fmt: off
+        return [optimiser, ], [lr_scheduler, ]
+        # fmt: on
+
+class AGGExperiment_ICU(pl.LightningModule):
+    def __init__(
+        self,
+        model_params: dict,
+        optimiser_params: dict,
+        data_params: dict,
+        logging_params: dict,
+    ):
+        super().__init__()
+
+        self.model_params = deepcopy(model_params)
+        self.model_params.pop("type")
+        self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
+        self.logging_params = logging_params
+        self.optimiser_params = optimiser_params
+        self.data_params = data_params
+        self.batch_size = (
+            self.data_params["batch_size"] if "batch_size" in data_params else None
+        )
+        self.train_MAE = MeanAbsoluteError()
+        self.val_MAE = MeanAbsoluteError()
+        self.train_RMSE = MeanSquaredError(squared=False)
+        self.val_RMSE = MeanSquaredError(squared=False)
+        self.calc_loss = nn.MSELoss()
+
+    def forward(
+        self, graph: ContinuousTimeGraphSample
+    ) -> Tuple[torch.Tensor, torch.Tensor, list]:
+        y_hat, attention_list = self.agg(graph, device=self.device)
+        if len(y_hat.shape) == 1:
+            y_hat = y_hat.unsqueeze(0)
+        loss = self.calc_loss(y_hat, graph.target.features.to(self.device))
+        return loss, y_hat, attention_list
+
+    def training_step(
+        self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
+    ) -> torch.Tensor:
+        loss, y_hat, _ = self.forward(graph_sample)
+        self.log("train_mse_loss", loss.item(), prog_bar=True)
+        target = graph_sample.target.features.to(self.device)
+        self.train_MAE(y_hat, target)
+        self.log(
+            "train_MAE",
+            self.train_MAE,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        self.train_RMSE(y_hat, target)
+        self.log(
+            "train_RMSE",
+            self.train_RMSE,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        scheduler = self.lr_schedulers()
+        self.log("lr", scheduler.get_last_lr()[0])
+        return loss
+
+    def validation_step(
+        self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, ContinuousTimeGraphSample]:
+        loss, y_hat, attention_list = self.forward(graph_sample)
+        if loss.isnan().item():
+            pass
+        self.log("val_mse_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
+        target = graph_sample.target.features.to(self.device)
+        self.val_MAE(y_hat, target)
+        self.log(
+            "val_MAE",
+            self.val_MAE,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        self.val_RMSE(y_hat, target)
+        self.log(
+            "val_RMSE",
+            self.val_RMSE,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        return loss.detach().to("cpu"), y_hat.detach().to("cpu"), graph_sample
+
+    # def on_validation_end(self) -> None:
+    #     y = torch.cat(self.validation_step_outputs['y'], dim=0)
+    #     y_est = torch.cat(self.validation_step_outputs['y_est'], dim=0)
+    #     type = torch.cat(self.validation_step_outputs['types'], dim=0)
+    #     self.validation_step_outputs['y'].clear()
+    #     self.validation_step_outputs['y_est'].clear()
+    #     self.validation_step_outputs['types'].clear()
+    #     type_index = self.trainer.val_dataloaders.dataset.type_index[:-1]
+    #     square_error = []
+    #     for i, name in enumerate(type_index):
+    #         index = type == i
+    #         y_type = y[index]
+    #         y_est_type = y_est[index]
+    #         mean = torch.mean(y_type)
+    #         std = torch.std(y_type)
+    #         if std.item() == 0 or torch.isnan(std):
+    #             continue
+    #         y_scaled = (y_type - mean) / std
+    #         y_est_scaled = (y_est_type - mean) / std
+    #         errors = y_scaled - y_est_scaled
+    #         se = torch.pow(errors, 2.0)
+    #         square_error.append(se)
+    #         rmse = torch.sqrt(torch.mean(se))
+    #         self.generate_plots(rmse, errors, y_scaled, name)
+    #     rmse_total = torch.sqrt(torch.mean(torch.cat(square_error, dim=0)))
+    #     print(f"RMSE_TOTAL: {rmse_total}")
+    #     self.logger.experiment.add_scalar("val_normalised_RMSE", rmse_total.item())
+
+    @staticmethod
+    def fig2img(fig):
+        """Convert a Matplotlib figure to a PIL Image and return it"""
+        T = transforms.ToTensor()
+        buf = io.BytesIO()
+        fig.savefig(buf)
+        buf.seek(0)
+        img = Image.open(buf)
+        return T(img), img
+
+    def generate_plots(self, rmse, errors, y_scaled, type):
+        plt.figure(figsize=(20, 10))
+        plt.subplot(1, 2, 1)
+        plt.hist(errors, bins=200, label=f"Errors{type}\n RMSE: {rmse}")
+        plt.legend()
+        plt.subplot(1, 2, 2)
+        plt.hist(y_scaled, bins=200, label=f'{type} data distribution')
+        plt.legend()
+        plt.savefig(Path('./lightning_logs') / self.logger.version / f'{type}.png', bbox_inches='tight')
+        plt.close()
+
+
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimiser = Adam(self.agg.parameters(), lr=self.optimiser_params["lr"])
+        lr_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer=optimiser,
+            start_factor=1.0,
+            end_factor=(
+                self.optimiser_params["min_lr"] / self.optimiser_params["max_lr"]
+            ),
+            total_iters=self.optimiser_params["total_iters"],
+        )
+        # fmt: off
+        return [optimiser, ], [lr_scheduler, ]
+        # fmt: on
+
+
+class AGGExperiment_KDD_Interpolation(pl.LightningModule):
+    def __init__(
+        self,
+        model_params: dict,
+        optimiser_params: dict,
+        data_params: dict,
+        logging_params: dict,
+    ):
+        super().__init__()
+
+        self.model_params = deepcopy(model_params)
+        self.model_params.pop("type")
+        self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
+        self.logging_params = logging_params
+        self.optimiser_params = optimiser_params
+        self.data_params = data_params
+        self.batch_size = (
+            self.data_params["batch_size"] if "batch_size" in data_params else None
+        )
+        self.train_MAE = MeanAbsoluteError()
+        self.val_MAE = MeanAbsoluteError()
+        self.train_RMSE = MeanSquaredError(squared=False)
+        self.val_RMSE = MeanSquaredError(squared=False)
+        self.train_PM25_RMSE = MeanSquaredError(squared=False)
+        self.val_PM25_RMSE = MeanSquaredError(squared=False)
+        self.calc_loss = nn.MSELoss()
+
+    def forward(
+        self, graph: ContinuousTimeGraphSample
+    ) -> Tuple[torch.Tensor, torch.Tensor, list]:
+        y_hat, attention_list = self.agg(graph, device=self.device)
+        if len(y_hat.shape) == 1:
+            y_hat = y_hat.unsqueeze(0)
+        loss = self.calc_loss(y_hat, graph.target.features.to(self.device))
+        return loss, y_hat, attention_list
+
+    def training_step(
+        self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
+    ) -> torch.Tensor:
+        loss, y_hat, _ = self.forward(graph_sample)
+        self.log("train_mse_loss", loss.item(), prog_bar=True)
+        target = graph_sample.target.features.to(self.device)
+        self.train_MAE(y_hat, target)
+        self.log(
+            "train_MAE",
+            self.train_MAE,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        self.train_RMSE(y_hat, target)
+        self.log(
+            "train_RMSE",
+            self.train_RMSE,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        pm25_mask = graph_sample.target.type_index == 0
+        if pm25_mask.any():
+            self.train_PM25_RMSE(y_hat[pm25_mask], target[pm25_mask])
+            self.log(
+                "train_PM25_RMSE",
+                self.train_PM25_RMSE,
+                on_step=True,
+                on_epoch=True,
+                batch_size=self.batch_size,
+            )
+        scheduler = self.lr_schedulers()
+        self.log("lr", scheduler.get_last_lr()[0])
+        return loss
+
+    def validation_step(
+        self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, ContinuousTimeGraphSample]:
+        loss, y_hat, attention_list = self.forward(graph_sample)
+        self.log("val_mse_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
+        target = graph_sample.target.features.to(self.device)
+        self.val_MAE(y_hat, target)
+        self.log(
+            "val_MAE",
+            self.val_MAE,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        self.val_RMSE(y_hat, target)
+        self.log(
+            "val_RMSE",
+            self.val_RMSE,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        pm25_mask = graph_sample.target.type_index == 0
+        if pm25_mask.any():
+            self.val_PM25_RMSE(y_hat[pm25_mask], target[pm25_mask])
+            self.log(
+                "val_PM25_RMSE",
+                self.val_PM25_RMSE,
+                on_step=True,
+                on_epoch=True,
+                batch_size=self.batch_size,
+            )
+        return loss.detach().to("cpu"), y_hat.detach().to("cpu"), graph_sample
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         optimiser = Adam(self.agg.parameters(), lr=self.optimiser_params["lr"])

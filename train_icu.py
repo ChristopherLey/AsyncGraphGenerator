@@ -29,9 +29,9 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 
-from AGG.experiments import AGGExperiment_PM25
+from AGG.experiments import AGGExperiment_ICU
 from AGG.extended_typing import collate_graph_samples
-from Datasets.Beijing.datareader import AirQualityDataRegression
+from Datasets.PhysioNet_2012.datareader import ICUData
 
 
 def main():
@@ -42,7 +42,7 @@ def main():
         dest="filename",
         metavar="FILE",
         help="path to the config file",
-        default="pm25_config.yaml",
+        default="icu_config.yaml",
     )
     parser.add_argument(
         "--resume-ckpt",
@@ -70,22 +70,31 @@ def main():
         print("Debugging Mode")
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
         config["data_params"]["num_workers"] = 0
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
+    # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
     if (
         "subset" in config["data_params"]
         and config["data_params"]["subset"] is not None
     ):
         assert config["data_params"]["subset"] < 1.0
-        subset = floor(
-            config["data_params"]["train_length"] * config["data_params"]["subset"]
+        train_reader = ICUData(
+            block_size=config["data_params"]["block_size"],
+            sparsity=config["data_params"]["sparsity"],
+            db_config=Path(config["data_params"]["db_config"]),
+            create_preprocessing=False,
+            version="train",
         )
+        train_length = len(train_reader)
+        subset = floor(train_length * config["data_params"]["subset"])
+        print(f"Training with a subset of {subset}/{train_length}")
         shuffle = True
     else:
         subset = None
         shuffle = False
-    train_reader = AirQualityDataRegression(
+    train_reader = ICUData(
         block_size=config["data_params"]["block_size"],
+        sparsity=config["data_params"]["sparsity"],
         db_config=Path(config["data_params"]["db_config"]),
+        create_preprocessing=False,
         version="train",
         subset=subset,
         shuffle=shuffle,
@@ -98,8 +107,9 @@ def main():
         num_workers=config["data_params"]["num_workers"],
         collate_fn=collate_graph_samples,
     )
-    val_reader = AirQualityDataRegression(
+    val_reader = ICUData(
         block_size=config["data_params"]["block_size"],
+        sparsity=config["data_params"]["sparsity"],
         db_config=Path(config["data_params"]["db_config"]),
         version="test",
     )
@@ -114,10 +124,9 @@ def main():
 
     config["model_params"]["num_node_types"] = len(train_reader.type_index)
     config["model_params"]["num_spatial_components"] = len(train_reader.spatial_index)
-    config["model_params"]["num_categories"] = len(train_reader.category_index)
-    config["logging_params"]["scaler"] = train_reader.meta_data["scaler"]
+    config["model_params"]["num_categories"] = -1
 
-    model = AGGExperiment_PM25(
+    model = AGGExperiment_ICU(
         model_params=config["model_params"],
         optimiser_params=config["optimiser_params"],
         data_params=config["data_params"],
@@ -131,15 +140,15 @@ def main():
         filename="model-{epoch:02d}-{val_mse_loss:.6f}",
     )
     mae_callback = ModelCheckpoint(
-        monitor="val_MAE_epoch",
+        monitor="val_RMSE_epoch",
         save_top_k=4,
         mode="min",
-        filename="model-{epoch:02d}-{val_MAE_epoch:.6f}",
+        filename="model-{epoch:02d}-{val_RMSE_epoch:.6f}",
     )
 
     callbacks = [mse_callback, mae_callback]
 
-    version_path = f"AGG-pm25-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
+    version_path = f"AGG-icu-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
 
     tb_logger = pl_loggers.TensorBoardLogger(
         save_dir=".",
@@ -151,10 +160,9 @@ def main():
         devices=[0],
         logger=tb_logger,
         callbacks=callbacks,
-        max_epochs=100,
+        max_epochs=1000,
         log_every_n_steps=1,
         gradient_clip_val=1.0,
-        resume_from_checkpoint=ckpt_path,
     )
 
     pprint(config)
@@ -165,7 +173,7 @@ def main():
     with open(log_path / "config.yaml", "w") as yml_file:
         yaml.dump(config, yml_file, default_flow_style=False)
 
-    trainer.fit(model, train_dataloader, val_dataloader)
+    trainer.fit(model, train_dataloader, val_dataloader, ckpt_path=ckpt_path)
 
 
 if __name__ == "__main__":

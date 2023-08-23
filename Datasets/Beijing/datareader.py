@@ -33,6 +33,7 @@ from tqdm import tqdm
 from tqdm import trange
 
 from AGG.extended_typing import ContinuousTimeGraphSample
+from AGG.graph_dataset import GraphDataset
 
 features = [
     "PM2.5",
@@ -114,8 +115,368 @@ graph_template: dict = {
     "category_index": [],
 }
 
+def split_string(strings: str):
+    return {
+        'time': datetime(
+                    year=int(strings[1]),
+                    month=int(strings[2]),
+                    day=int(strings[3]),
+                    hour=int(strings[4]),
+                ),
+        'PM2.5': strings[5],
+        'PM10': strings[6],
+        'S02': strings[7],
+        'N02': strings[8],
+        'CO': strings[9],
+        '03': strings[10],
+        'TEMP': strings[11],
+        'PRES': strings[12],
 
-def decompose_data(config: dict, block_size: int, exists_ok: bool = True):
+    }
+
+def decompose_pm2_5_data(file: Path):
+    decomposed_data = []
+    header = []
+    with open(file, "r", encoding="utf-8") as f:
+        contents = f.readlines()
+        for i, line in enumerate(contents):
+            strings = line[:-1].split(",")
+            if i == 0:
+                for title in strings:
+                    title = title.split('"')[1]
+                    if title not in ["year", "month", "day", "hour"]:
+                        header.append(title)
+                    else:
+                        if title == "year":
+                            header.append("datetime")
+            else:
+                data: list = []
+                idx = 0
+                for data_field in header:
+                    if data_field == "datetime":
+                        idx = 5
+                        data.append(
+                            datetime(
+                                year=int(strings[1]),
+                                month=int(strings[2]),
+                                day=int(strings[3]),
+                                hour=int(strings[4]),
+                            )
+                        )
+                    else:
+                        if strings[idx] == "NA":
+                            data.append(None)
+                        else:
+                            if idx in [15, 17]:
+                                data.append(strings[idx].split('"')[1])
+                            else:
+                                data.append(float(strings[idx]))
+                        idx += 1
+                decomposed_data.append(data)
+    return header, decomposed_data
+
+def decompose_KDD(config:dict, exist_ok: bool = True):
+    root_path = Path(config["data_root"])
+    mongo_db_client = MongoClient(host=config["host"], port=config["port"])
+    db = mongo_db_client[config["base"]]
+    db_raw = db['raw']
+    count = db_raw.estimated_document_count()
+    if count > 0:
+        if exist_ok:
+            return
+        else:
+            db_raw.drop()
+    idx = 0
+    for data_csv in root_path.iterdir():
+        header, decomposed_data = decompose_pm2_5_data(data_csv)
+        datasets = []
+        for entry_list in decomposed_data:
+            for type_index, feature in enumerate(features):
+                slice = header.index(feature)
+                node_feature = entry_list[slice]
+                if node_feature is None:
+                    continue
+                if entry_list[12] is None:
+                    wd = "None"
+                else:
+                    wd = entry_list[12]
+                raw_entry = {
+                    'idx': idx,
+                    'time': entry_list[1],
+                    'node_features': node_feature,
+                    'category_index': unique_wd.index(wd),
+                    'type_index': type_index,
+                    'spatial_index': unique_stations.index(entry_list[14])
+                }
+                idx += 1
+                datasets.append(raw_entry)
+        db_raw.insert_many(datasets)
+
+def compute_normalisation(config:dict, exist_ok: bool = True):
+    root_path = Path(config["data_root"])
+    mongo_db_client = MongoClient(host=config["host"], port=config["port"])
+    db = mongo_db_client[config["base"]]
+    db_raw = db['raw']
+    count = db_raw.estimated_document_count()
+    assert count > 0, f"{db_raw}:{count=}"
+    db_param = db['param']
+    if db_param.estimated_document_count() > 0:
+        if exist_ok:
+            return
+        else:
+            db_param.drop()
+    params = {
+        "scaling": {},
+        'features': features,
+        'categories': unique_wd,
+        'spatial': unique_stations
+    }
+    raw_data_lists = {}
+    for feature in features:
+        feature_cursor = db_raw.find({"type_index": {
+            "$eq": features.index(feature)
+        }})
+        raw_data_lists[feature] = []
+        for item in feature_cursor:
+            raw_data_lists[feature].append(item['node_features'])
+    for key, item in raw_data_lists.items():
+        params['scaling'][key] = {
+            "mean": np.mean(item),
+            'std': np.std(item)
+        }
+    db_param.insert_one(params)
+
+
+def normalise(feature, scaling):
+    return (feature - scaling['mean'])/scaling['std']
+
+
+def random_index(data_len: int, sparsity: float):
+    removed = np.random.choice(
+        data_len,
+        size=int(np.floor(data_len * sparsity)),
+        replace=False
+    )
+    removed.sort()
+    remainder_bool = np.array(
+        [i not in removed for i in trange(data_len)]
+    )
+    remainder = np.arange(data_len)[remainder_bool]
+    return removed, remainder
+
+
+def create_indexes(
+        config: dict,
+        sparsity: float,
+        block_name: str,
+        replace: bool = False
+):
+    mongo_db_client = MongoClient(host=config["host"], port=config["port"])
+    db = mongo_db_client[config["base"]]
+    db_params = db['param']
+    assert db_params.estimated_document_count() > 0
+    db_raw = db['raw']
+    assert db_raw.estimated_document_count() > 0
+    raw_train = []
+    for mask in training_masks:
+        raw_train.append(list(
+                db_raw.find({
+                    'time': {
+                        '$gte': mask[0],
+                        '$lte': mask[1]
+                    }
+                }).sort('time')
+            ))
+    raw_test = []
+    for mask in test_masks:
+        raw_test.append(list(
+            db_raw.find({
+                'time': {
+                    '$gt': mask[0],
+                    '$lt': mask[1]
+                }
+            }).sort('time')
+        ))
+    index_entry = db[block_name]['indexes']
+    if replace and index_entry['train'].estimated_document_count() > 0:
+        index_entry['train'].drop()
+    if index_entry['train'].estimated_document_count() > 0:
+        train_indexes = list(index_entry['train'].find({}))
+    else:
+        train_indexes = []
+        for data in raw_train:
+            removed, remainder = random_index(len(data), sparsity)
+            train_indexes.append({
+                'removed': removed.tolist(),
+                'remainder': remainder.tolist()
+            })
+        index_entry['train'].insert_many(train_indexes)
+    if replace and index_entry['test'].estimated_document_count() > 0:
+        index_entry['test'].drop()
+    if index_entry['test'].estimated_document_count() > 0:
+        test_indexes = list(index_entry['test'].find({}))
+    else:
+        test_indexes = []
+        for data in raw_test:
+            removed, remainder = random_index(len(data), sparsity)
+            test_indexes.append({
+                'removed': removed.tolist(),
+                'remainder': remainder.tolist()
+            })
+        index_entry['test'].insert_many(test_indexes)
+    index = {
+        'train': train_indexes,
+        'test': test_indexes
+    }
+    return index, raw_train, raw_test
+
+
+def create_interpolation_dataset(
+        config: dict,
+        block_size: int,
+        exists_ok: bool = True,
+        sparsity: float = 0.5,
+        block_steps: int = int(3200//1.5),
+        time_scale: int = 3600*72,
+        only_pm25: bool = True):
+    mongo_db_client = MongoClient(host=config["host"], port=config["port"])
+    db = mongo_db_client[config["base"]]
+    db_params = db['param']
+    assert db_params.estimated_document_count() > 0
+    db_raw = db['raw']
+    assert db_raw.estimated_document_count() > 0
+    params = db_params.find_one({})
+    if only_pm25:
+        block_name = f"block_{block_size:02d}_{100 * sparsity}%_pm25"
+    else:
+        block_name = f"block_{block_size:02d}_{100 * sparsity}%"
+    block_db = db[block_name]
+    test_block = block_db['test']
+    train_block = block_db['train']
+    if test_block.estimated_document_count() > 0 and train_block.estimated_document_count() > 0:
+        if exists_ok:
+            return
+        else:
+            train_block.drop()
+            test_block.drop()
+            block_db.drop()
+    print(f"Creating interpolation dataset for {block_name}")
+    indexes, raw_train, raw_test = create_indexes(config, sparsity, block_name)
+    test_sample_count = 0
+    train_sample_count = 0
+    for index, raw in tqdm(zip(indexes['train'], raw_train)):
+        for n in trange(0, len(index['remainder']) - block_size, block_steps):
+            write_data = []
+            input_index = index['remainder'][n:(n + block_size)]
+            max_time = raw[input_index[-1]]['time']
+            graph = copy.deepcopy(graph_template)
+            for k in range(len(input_index)):
+                raw_entry = raw[input_index[k]]
+                graph['node_features'].append(
+                    normalise(
+                        raw_entry['node_features'],
+                        params['scaling'][features[raw_entry['type_index']]])
+                )
+                graph['time'].append(
+                    (max_time - raw_entry['time']).total_seconds()/time_scale
+                )
+                graph['category_index'].append(raw_entry['category_index'])
+                graph['type_index'].append(raw_entry['type_index'])
+                graph['spatial_index'].append(raw_entry['spatial_index'])
+            graph["key_padding_mask"] = (np.zeros_like(input_index) != 0).tolist()
+            remainder_index_array = np.array(index['remainder'])
+            mask = (remainder_index_array > min(input_index)) & (
+                    remainder_index_array < max(input_index)
+            )
+            train_target = remainder_index_array[mask]
+            for i in range(train_target.shape[0]):
+                k = train_target[i]
+                if raw[k]["type_index"] == 0 or not only_pm25:
+                    graph_sample = copy.deepcopy(graph)
+                    target = copy.deepcopy(target_template)
+                    feature_type = features[raw[k]["type_index"]]
+                    target["features"] = [
+                        normalise(
+                            raw[k]['node_features'],
+                            params['scaling'][feature_type]
+                        ),
+                    ]
+                    target["type_index"] = [
+                        raw[k]["type_index"],
+                    ]
+                    target["spatial_index"] = [
+                        raw[k]["spatial_index"],
+                    ]
+                    target["category_index"] = [
+                        raw[k]["category_index"],
+                    ]
+                    target["time"] = [
+                        (max_time - raw[k]["time"]).total_seconds() / time_scale,
+                    ]
+                    graph_sample["target"] = target
+                    graph_sample["idx"] = train_sample_count
+                    train_sample_count += 1
+                    write_data.append(graph_sample)
+            if len(write_data) > 0:
+                train_block.insert_many(write_data)
+    for index, raw in tqdm(zip(indexes['test'], raw_test)):
+        for n in trange(0, len(index['remainder']) - block_size, block_steps):
+            write_data = []
+            input_index = index['remainder'][n:(n + block_size)]
+            max_time = raw[input_index[-1]]['time']
+            graph = copy.deepcopy(graph_template)
+            for k in range(len(input_index)):
+                raw_entry = raw[input_index[k]]
+                graph['node_features'].append(
+                    normalise(
+                        raw_entry['node_features'],
+                        params['scaling'][features[raw_entry['type_index']]])
+                )
+                graph['time'].append(
+                    (max_time - raw_entry['time']).total_seconds()/time_scale
+                )
+                graph['category_index'].append(raw_entry['category_index'])
+                graph['type_index'].append(raw_entry['type_index'])
+                graph['spatial_index'].append(raw_entry['spatial_index'])
+            graph["key_padding_mask"] = (np.zeros_like(input_index) != 0).tolist()
+            remainder_index_array = np.array(index['remainder'])
+            mask = (remainder_index_array > min(input_index)) & (
+                    remainder_index_array < max(input_index)
+            )
+            test_target = remainder_index_array[mask]
+            for i in range(test_target.shape[0]):
+                k = test_target[i]
+                graph_sample = copy.deepcopy(graph)
+                target = copy.deepcopy(target_template)
+                if raw[k]["type_index"] == 0 or not only_pm25:
+                    feature_type = features[raw[k]["type_index"]]
+                    target["features"] = [
+                        normalise(
+                            raw[k]['node_features'],
+                            params['scaling'][feature_type]
+                        ),
+                    ]
+                    target["type_index"] = [
+                        raw[k]["type_index"],
+                    ]
+                    target["spatial_index"] = [
+                        raw[k]["spatial_index"],
+                    ]
+                    target["category_index"] = [
+                        raw[k]["category_index"],
+                    ]
+                    target["time"] = [
+                        (max_time - raw[k]["time"]).total_seconds() / time_scale,
+                    ]
+                    graph_sample["target"] = target
+                    graph_sample["idx"] = test_sample_count
+                    test_sample_count += 1
+                    write_data.append(graph_sample)
+            if len(write_data) > 0:
+                test_block.insert_many(write_data)
+
+
+def decompose_data_regression_block(config: dict, block_size: int, exists_ok: bool = True):
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client["Beijing"]
     df: pd.DataFrame = pd.read_hdf(Path(config["data_root"]) / "pm2_5_df.h5")  # noqa
@@ -264,7 +625,92 @@ def decompose_data(config: dict, block_size: int, exists_ok: bool = True):
                 split.insert_many(data)
 
 
-class AirQualityData(Dataset):
+class KDDInterpolationDataset(GraphDataset):
+    valid_versions = ["train", "test"]
+
+    def __init__(
+            self,
+            block_size: int,
+            sparsity: float,
+            db_config: Path,
+            version: str = "train",
+            subset: Optional[int] = None,
+            shuffle: bool = False,
+            only_pm25: bool = True
+    ):
+        assert (
+                version in self.valid_versions
+        ), f"{version=} is not a valid version, valid version include {self.valid_versions}"
+        with open(db_config, "r") as f:
+            self.mongo_config: dict = yaml.safe_load(f)
+        mongo_db_client = MongoClient(
+            host=self.mongo_config["host"], port=self.mongo_config["port"]
+        )
+        db = mongo_db_client[self.mongo_config["base"]]
+        if only_pm25:
+            block_name = f"block_{block_size:02d}_{100 * sparsity}%_pm25.{version}"
+        else:
+            block_name = f"block_{block_size:02d}_{100 * sparsity}%.{version}"
+
+        if block_name not in db.list_collection_names():
+                raise Exception(f"No preprocessing data available for {block_name=}")
+        else:
+            print(f"Pre-processing found for {block_name=}")
+        self.preprocessing_reference = block_name
+        self.split = version
+        db_handle = mongo_db_client[self.mongo_config["base"]][
+            self.preprocessing_reference
+        ]
+        self.meta_data = db['param'].find_one({})
+        self.spatial_index = self.meta_data.pop("spatial")
+        self.type_index = self.meta_data.pop("features")
+        self.category_index = self.meta_data.pop('categories')
+        print(f"Creating index for {db_handle}...")
+        db_handle.create_index("idx")
+        print("Done!")
+        self.length = db_handle.estimated_document_count()
+        self.lazy_loaded = False
+        self.db_handle = None
+        self.shuffle = shuffle
+        self.subset: Optional[int] = None
+        if isinstance(subset, int) and 0 < subset < self.length:
+            self.subset = subset
+        elif subset is not None:
+            if isinstance(subset, int):
+                Warning(
+                    f"subset key should be an integer 0 < subset < dataset_length, instead: {subset=}"
+                )
+            else:
+                Warning(
+                    f"subset key should be Union[None, int], instead type: {type(subset)} was found"
+                )
+
+    def lazy_load_db(self):
+        mongo_db_client = MongoClient(
+            host=self.mongo_config["host"], port=self.mongo_config["port"]
+        )
+        self.db_handle = mongo_db_client[self.mongo_config["base"]][
+            self.preprocessing_reference
+        ]
+        self.lazy_loaded = True
+
+    def __len__(self):
+        if self.subset is None:
+            return self.length
+        else:
+            return self.subset
+
+    def __getitem__(self, item):
+        if not self.lazy_loaded:
+            self.lazy_load_db()
+        if self.shuffle:
+            item = randint(0, self.length - 1)
+        sample = self.graph_transform(self.db_handle.find_one({"idx": item}))
+        sample.type_index[sample.type_index == -1] = len(self.type_index)
+        return sample
+
+
+class AirQualityDataRegression(Dataset):
     valid_versions = ["train", "test"]
 
     def __init__(
@@ -290,7 +736,7 @@ class AirQualityData(Dataset):
                 print(
                     f"No pre-processing for {block_size=}, this could take a while..."
                 )
-                decompose_data(self.mongo_config, block_size)
+                decompose_data_regression_block(self.mongo_config, block_size)
             else:
                 raise Exception(f"No preprocessing data available for {block_size=}")
         else:
@@ -304,7 +750,7 @@ class AirQualityData(Dataset):
         self.category_index = self.meta_data.pop("category_index")
         self.spatial_index = self.meta_data.pop("spatial_index")
         self.type_index = self.meta_data.pop("type_index")
-        db_split = db_handle[self.split]
+        db_split = db_handle
         print(f"Creating index for {db_split}...")
         db_split.create_index("idx")
         print("Done!")
@@ -372,10 +818,38 @@ class AirQualityData(Dataset):
         return sample
 
 
-def test_datareader():
-    test_obj = AirQualityData(10, Path("./data/mongo_config.yaml"), version="test")
-    print(len(test_obj))  # 749529
-    assert isinstance(len(test_obj), int)
-    sample: ContinuousTimeGraphSample = test_obj[1]
-    assert not sample.node_features.isnan().any()
-    assert not sample.target.features.isnan()
+# def test_datareader():
+#     test_obj = KDDInterpolationDataset(
+#             block_size=1500,
+#             sparsity=0.1,
+#             db_config=Path("./data/mongo_config.yaml"),
+#             version='test'
+#         )
+#     print(len(test_obj))  # 749529
+#     assert isinstance(len(test_obj), int)
+#     sample: ContinuousTimeGraphSample = test_obj[1]
+#     assert not sample.node_features.isnan().any()
+#     assert not sample.target.features.isnan()
+
+
+if __name__ == "__main__":
+    with open("./data/mongo_config.yaml", "r") as f:
+        config: dict = yaml.safe_load(f)
+        config['data_root'] = 'data/raw'
+    create_interpolation_dataset(config, block_size=1500, sparsity=0.1, block_steps=300, exists_ok=False)
+        # test_obj = KDDInterpolationDataset(
+        #     block_size=1500,
+        #     sparsity=0.1,
+        #     db_config=Path("./data/mongo_config.yaml"),
+        #     version='test'
+        # )
+        # train_obj = KDDInterpolationDataset(
+        #     block_size=1500,
+        #     sparsity=0.1,
+        #     db_config=Path("./data/mongo_config.yaml"),
+        #     version='train'
+        # )
+        # print(len(test_obj))
+        # print(len(train_obj))
+        # print(test_obj[149932])
+        # print(train_obj[304826])

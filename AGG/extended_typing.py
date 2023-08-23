@@ -41,7 +41,7 @@ def cast_2_float_tensor(v: Union[list, FloatTensor], values: dict, field: ModelF
         raise ValueError(
             f"{field.name} shape: {entry.shape} != features.shape {values['node_features'].shape}"
         )
-    return entry
+    return torch.nan_to_num(entry)
 
 
 def cast_2_long_tensor(v: Union[list, LongTensor], values: dict, field: ModelField):
@@ -65,7 +65,7 @@ class TargetNode(BaseModel):
     type_index: LongTensor
     time: FloatTensor
     spatial_index: LongTensor
-    category_index: Optional[LongTensor]
+    category_index: Optional[Union[LongTensor, FloatTensor]]
 
     _cast_features: classmethod = validator("features", allow_reuse=True, pre=True)(
         cast_2_float_tensor
@@ -79,9 +79,20 @@ class TargetNode(BaseModel):
     _cast_spatial_index: classmethod = validator(
         "spatial_index", allow_reuse=True, pre=True
     )(cast_2_long_tensor)
-    _cast_category_index: classmethod = validator(
-        "category_index", allow_reuse=True, pre=True
-    )(cast_2_long_tensor)
+
+    @validator("category_index", pre=True)
+    def create_category_index(cls, v: Union[dict, LongTensor, FloatTensor], values: dict):
+        if isinstance(v, LongTensor):
+            entry = v
+        elif isinstance(v, FloatTensor):
+            entry = v
+        else:
+            if isinstance(v[0], int):
+                entry = torch.tensor(v, dtype=torch.long)
+            else:
+                entry = torch.tensor(v, dtype=torch.float)
+                entry = torch.nan_to_num(entry)
+        return entry
 
     class Config:
         arbitrary_types_allowed = True
@@ -102,7 +113,7 @@ class ContinuousTimeGraphSample(BaseModel):
     target: TargetNode
     type_index: LongTensor
     spatial_index: LongTensor
-    category_index: Optional[LongTensor]
+    category_index: Optional[Union[LongTensor, FloatTensor]]
 
     _cast_node_features: classmethod = validator(
         "node_features", allow_reuse=True, pre=True
@@ -117,9 +128,20 @@ class ContinuousTimeGraphSample(BaseModel):
     _cast_spatial_index: classmethod = validator(
         "spatial_index", allow_reuse=True, pre=True
     )(cast_2_long_tensor)
-    _cast_category_index: classmethod = validator(
-        "category_index", allow_reuse=True, pre=True
-    )(cast_2_long_tensor)
+
+    @validator("category_index", pre=True)
+    def create_category_index(cls, v: Union[dict, LongTensor, FloatTensor], values: dict):
+        if isinstance(v, LongTensor):
+            entry = v
+        elif isinstance(v, FloatTensor):
+            entry = v
+        else:
+            if isinstance(v[0], int):
+                entry = torch.tensor(v, dtype=torch.long)
+            else:
+                entry = torch.tensor(v, dtype=torch.float)
+                entry = torch.nan_to_num(entry)
+        return entry
 
     @validator("target", pre=True)
     def create_target_node(cls, v: Union[dict, TargetNode]):
@@ -159,12 +181,12 @@ class ContinuousTimeGraphSample(BaseModel):
         else:
             entry = torch.tensor(v, dtype=torch.bool)
         if (
-            entry.shape[-1] != values["node_features"].shape[-2]
-            or entry.shape[-2] != values["node_features"].shape[-2]
+            entry.shape[-1] != values["time"].shape[-1]
+            or entry.shape[-2] != values["time"].shape[-1]
         ):
             raise ValueError(
-                f"{field.name} shape: {entry.shape} != node_features.shape "
-                f"[{values['node_features'].shape[-2]}, {values['node_features'].shape[-2]}]"
+                f"{field.name} shape: {entry.shape} != "
+                f"[{values['time'].shape[-1]}, {values['time'].shape[-1]}]"
             )
         return entry
 

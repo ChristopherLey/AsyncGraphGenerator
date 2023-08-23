@@ -20,9 +20,9 @@ class GraphDataset(Dataset):
         if "edge_index" in sample and len(sample["edge_index"]) == 0:
             sample.pop("edge_index")
         graph_sample = ContinuousTimeGraphSample(**sample)
-        graph_sample.attention_mask = torch.logical_or(
-            graph_sample.attention_mask, graph_sample.key_padding_mask.unsqueeze(0)
-        )
+        # graph_sample.attention_mask = torch.logical_or(
+        #     graph_sample.attention_mask, graph_sample.key_padding_mask.unsqueeze(0)
+        # )
         # adj_t = (~torch.logical_or(graph_sample.attention_mask, graph_sample.key_padding_mask.unsqueeze(1))).long()
         # graph_sample.edge_index = self.adj_2_edge(adj_t)
         graph_sample.node_features = torch.nan_to_num(graph_sample.node_features)
