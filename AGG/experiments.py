@@ -32,7 +32,6 @@ from torchmetrics import MeanAbsoluteError
 from torchmetrics import MeanSquaredError
 from torchmetrics import R2Score
 from torchvision import transforms
-from torchvision.utils import save_image
 
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.transformer_model import AsynchronousGraphGeneratorTransformer

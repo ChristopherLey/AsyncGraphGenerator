@@ -28,10 +28,9 @@ from pymongo import MongoClient
 from tqdm import tqdm
 from tqdm import trange
 
-from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.graph_dataset import GraphDataset
 
-params = {
+params: Dict[str, dict] = {
     "Age": {"range": [15, 90.0]},
     "Gender": {"categories": 2, "range": [0, 1], "minLimit": None, "maxLimit": None},
     "Height": {"range": [121.9, 462.3], "minLimit": 100, "maxLimit": 300},
@@ -341,8 +340,8 @@ def normalise_physionet(config: dict, exist_ok: bool = True):
         for entry in dir_loc.iterdir():
             with open(entry, "r") as f:
                 data_str_list: list[str] = f.readlines()
-            _, name, record_id = data_str_list[1][:-1].split(",")
-            record_id = int(record_id)
+            _, name, record_id_str = data_str_list[1][:-1].split(",")
+            record_id = int(record_id_str)
             graph_entry = copy.deepcopy(graph_template)
             assert name == "RecordID"
             graph_entry["idx"] = record_id
@@ -419,8 +418,8 @@ def scale_physionet(config: dict, exist_ok: bool = True):
         for entry in dir_loc.iterdir():
             with open(entry, "r") as f:
                 data_str_list: list[str] = f.readlines()
-            _, name, record_id = data_str_list[1][:-1].split(",")
-            record_id = int(record_id)
+            _, name, record_id_str = data_str_list[1][:-1].split(",")
+            record_id = int(record_id_str)
             graph_entry = copy.deepcopy(graph_template)
             assert name == "RecordID"
             graph_entry["idx"] = record_id
@@ -851,8 +850,6 @@ if __name__ == "__main__":
     )
     print(len(test_obj))  # 11701077
     assert isinstance(len(test_obj), int)
-    # with open("/home/chris/Dropbox/AI/Graph Networks/AGG/AsyncGraphGeneration/Datasets/PhysioNet_2012/data/mongo_config.yaml") as f:
-    #     config = yaml.safe_load(f)
     # decompose_physionet_data_interpolation(
     #     config,
     #     block_size=100,

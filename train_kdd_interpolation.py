@@ -104,7 +104,7 @@ def main():
         drop_last=False,
         num_workers=config["data_params"]["num_workers"],
         collate_fn=collate_graph_samples,
-        persistent_workers=True
+        persistent_workers=True,
     )
     val_reader = KDDInterpolationDataset(
         block_size=config["data_params"]["block_size"],
@@ -119,7 +119,7 @@ def main():
         drop_last=False,
         num_workers=config["data_params"]["num_workers"],
         collate_fn=collate_graph_samples,
-        persistent_workers=True
+        persistent_workers=True,
     )
 
     config["model_params"]["num_node_types"] = len(train_reader.type_index)
@@ -147,8 +147,10 @@ def main():
 
     callbacks = [mse_callback, mae_callback]
 
-    version_path = (f"AGG-kdd_{int(config['data_params']['sparsity'] * 100)}%_"
-                    f"inter-{datetime.now().strftime('%d-%m_%H:%M:%S')}")
+    version_path = (
+        f"AGG-kdd_{int(config['data_params']['sparsity'] * 100)}%_"
+        f"inter-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
+    )
 
     tb_logger = pl_loggers.TensorBoardLogger(
         save_dir=".",

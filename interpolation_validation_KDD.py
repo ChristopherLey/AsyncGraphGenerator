@@ -1,30 +1,31 @@
+import copy
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import yaml
-import random
-import copy
-import numpy as np
+from pymongo import MongoClient
 
 from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
-from AGG.extended_typing import collate_graph_samples
-from Datasets.Beijing.datareader import test_masks, graph_template, target_template, normalise, features
-from pymongo import MongoClient
+from Datasets.Beijing.datareader import features
+from Datasets.Beijing.datareader import graph_template
+from Datasets.Beijing.datareader import normalise
+from Datasets.Beijing.datareader import target_template
+from Datasets.Beijing.datareader import test_masks
 
 best_model_path = Path()
 assert best_model_path.exists()
 checkpoint = torch.load(best_model_path)
 
-model_state_dict = checkpoint['state_dict']
-config_path = best_model_path.parent.parent / 'config.yaml'
-with open(config_path, 'r') as f:
+model_state_dict = checkpoint["state_dict"]
+config_path = best_model_path.parent.parent / "config.yaml"
+with open(config_path, "r") as f:
     config = yaml.safe_load(f)
 
-if 'type' in config['model_params']:
-    config['model_params'].pop('type')
+if "type" in config["model_params"]:
+    config["model_params"].pop("type")
 
-agg = AsynchronousGraphGeneratorTransformer(**config['model_params'])
+agg = AsynchronousGraphGeneratorTransformer(**config["model_params"])
 agg.load_state_dict(model_state_dict)
 
 db_config_path = Path(config["data_params"]["db_config"])
@@ -36,22 +37,26 @@ db_params = db["param"]
 params = db_params.find_one({})
 db_raw = db["raw"]
 block_name = f'block_{config["data_params"]["block_size"]:02d}_{100 * config["data_params"]["sparsity"]}%_pm25'
-index_entry = db[block_name]["indexes"]['test']
+index_entry = db[block_name]["indexes"]["test"]
 
-raw_test = list(db_raw.find({"time": {"$gt": test_masks[0][0], "$lt": test_masks[0][1]}}).sort("time"))
+raw_test = list(
+    db_raw.find({"time": {"$gt": test_masks[0][0], "$lt": test_masks[0][1]}}).sort(
+        "time"
+    )
+)
 idx = np.arange(0, len(raw_test))
 np.random.shuffle(idx)
-subset_size = idx.shape[0]//2
+subset_size = idx.shape[0] // 2
 removed = idx[:subset_size]
 remainder = idx[subset_size:]
 removed.sort()
 remainder.sort()
-samples = []
+samples: list = []
 time_scale: int = 3600 * 72
-block_size = config['data_params']['block_size']
+block_size = config["data_params"]["block_size"]
 write_data = []
 for n in range(0, len(remainder) - block_size, block_size):
-    input_index = remainder[n:(n+block_size)]
+    input_index = remainder[n : (n + block_size)]
     max_time = raw_test[input_index[-1]]["time"]
     graph = copy.deepcopy(graph_template)
     for k in range(input_index.shape[0]):
@@ -69,9 +74,7 @@ for n in range(0, len(remainder) - block_size, block_size):
         graph["type_index"].append(raw_entry["type_index"])
         graph["spatial_index"].append(raw_entry["spatial_index"])
     graph["key_padding_mask"] = (np.zeros_like(input_index) != 0).tolist()
-    mask = (removed > min(input_index)) & (
-            removed < max(input_index)
-    )
+    mask = (removed > min(input_index)) & (removed < max(input_index))
     test_target = removed[mask]
     for i in range(test_target.shape[0]):
         k = test_target[i]

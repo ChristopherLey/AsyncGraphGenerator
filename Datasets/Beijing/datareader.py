@@ -19,6 +19,7 @@ import copy
 from datetime import datetime
 from pathlib import Path
 from random import randint
+from typing import Any
 from typing import Dict
 from typing import Optional
 
@@ -216,7 +217,6 @@ def decompose_KDD(config: dict, exist_ok: bool = True):
 
 
 def compute_normalisation(config: dict, exist_ok: bool = True):
-    root_path = Path(config["data_root"])
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
     db_raw = db["raw"]
@@ -228,13 +228,13 @@ def compute_normalisation(config: dict, exist_ok: bool = True):
             return
         else:
             db_param.drop()
-    params = {
+    params: Dict[str, Any] = {
         "scaling": {},
         "features": features,
         "categories": unique_wd,
         "spatial": unique_stations,
     }
-    raw_data_lists = {}
+    raw_data_lists: Dict[str, list] = {}
     for feature in features:
         feature_cursor = db_raw.find({"type_index": {"$eq": features.index(feature)}})
         raw_data_lists[feature] = []
@@ -276,7 +276,6 @@ def create_indexes(
         raw_test.append(
             list(db_raw.find({"time": {"$gt": mask[0], "$lt": mask[1]}}).sort("time"))
         )
-    index_entry = db[block_name]["indexes"]
     train_indexes = []
     for data in raw_train:
         removed, remainder = random_index(len(data), sparsity)
@@ -293,9 +292,11 @@ def create_indexes(
     return index, raw_train, raw_test
 
 
-def create_data_block(index, raw, block_size, n, time_scale, only_pm25, params, sample_count):
+def create_data_block(
+    index, raw, block_size, n, time_scale, only_pm25, params, sample_count
+):
     write_data = []
-    input_index = index["remainder"][n: (n + block_size)]
+    input_index = index["remainder"][n : (n + block_size)]
     max_time = raw[input_index[-1]]["time"]
     graph = copy.deepcopy(graph_template)
     for k in range(len(input_index)):
@@ -315,7 +316,7 @@ def create_data_block(index, raw, block_size, n, time_scale, only_pm25, params, 
     graph["key_padding_mask"] = (np.zeros_like(input_index) != 0).tolist()
     removed_index_array = np.array(index["removed"])
     mask = (removed_index_array > min(input_index)) & (
-            removed_index_array < max(input_index)
+        removed_index_array < max(input_index)
     )
     graph_target = removed_index_array[mask]
     for i in range(graph_target.shape[0]):
@@ -325,9 +326,7 @@ def create_data_block(index, raw, block_size, n, time_scale, only_pm25, params, 
             target = copy.deepcopy(target_template)
             feature_type = features[raw[k]["type_index"]]
             target["features"] = [
-                normalise(
-                    raw[k]["node_features"], params["scaling"][feature_type]
-                ),
+                normalise(raw[k]["node_features"], params["scaling"][feature_type]),
             ]
             target["type_index"] = [
                 raw[k]["type_index"],
@@ -346,6 +345,7 @@ def create_data_block(index, raw, block_size, n, time_scale, only_pm25, params, 
             sample_count += 1
             write_data.append(graph_sample)
     return write_data, sample_count
+
 
 def create_interpolation_dataset(
     config: dict,
@@ -386,12 +386,30 @@ def create_interpolation_dataset(
     train_sample_count = 0
     for index, raw in tqdm(zip(indexes["train"], raw_train)):
         for n in trange(0, len(index["remainder"]) - block_size, block_steps):
-            write_data, train_sample_count = create_data_block(index, raw, block_size, n, time_scale, only_pm25, params, train_sample_count)
+            write_data, train_sample_count = create_data_block(
+                index,
+                raw,
+                block_size,
+                n,
+                time_scale,
+                only_pm25,
+                params,
+                train_sample_count,
+            )
             if len(write_data) > 0:
                 train_block.insert_many(write_data)
     for index, raw in tqdm(zip(indexes["test"], raw_test)):
         for n in trange(0, len(index["remainder"]) - block_size, block_steps):
-            write_data, test_sample_count = create_data_block(index, raw, block_size, n, time_scale, only_pm25, params, test_sample_count)
+            write_data, test_sample_count = create_data_block(
+                index,
+                raw,
+                block_size,
+                n,
+                time_scale,
+                only_pm25,
+                params,
+                test_sample_count,
+            )
             if len(write_data) > 0:
                 test_block.insert_many(write_data)
 

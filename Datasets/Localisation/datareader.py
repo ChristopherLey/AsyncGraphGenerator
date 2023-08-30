@@ -25,7 +25,8 @@ from typing import Optional
 import numpy as np
 import yaml
 from pymongo import MongoClient
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from tqdm import trange
 
@@ -96,15 +97,17 @@ graph_template: dict = {
     "category_index": [],
 }
 scaler = {
-    'fields': ['X', 'Y', 'Z'],
-    'mean': [2.8113479961092374, 1.6968769404813713, 0.4182104464547134],
-    'std': [0.91622372110056, 0.4737676249131146, 0.3791233780673026],
-    'time': 32705408.0,
-    'type': 'Normal'
+    "fields": ["X", "Y", "Z"],
+    "mean": [2.8113479961092374, 1.6968769404813713, 0.4182104464547134],
+    "std": [0.91622372110056, 0.4737676249131146, 0.3791233780673026],
+    "time": 32705408.0,
+    "type": "Normal",
 }
 
 
-def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5, normal: bool=True):
+def decompose_data(
+    config: dict, block_size: int, exists_ok=True, sparsity=0.5, normal: bool = True
+):
     with open(config["data_root"], "r") as data_file:
         data_list = data_file.readlines()
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
@@ -201,8 +204,8 @@ def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5, 
         # remainder = np.arange(len(parsed_data[key]["time"]))[remainder_idx]
         removed_idx = np.arange(removed.shape[0])
         np.random.shuffle(removed_idx)
-        test_index = removed_idx[:int(removed.shape[0] // 5)]
-        train_index = removed_idx[int(removed.shape[0] // 5):]
+        test_index = removed_idx[: int(removed.shape[0] // 5)]
+        train_index = removed_idx[int(removed.shape[0] // 5) :]
         # test_index = np.random.choice(
         #     removed.shape[0], size=removed.shape[0] // 5, replace=False
         # )
@@ -320,7 +323,7 @@ class ActivityData(GraphDataset):
         create_preprocessing: bool = False,
         shuffle: bool = False,
         subset: Optional[int] = None,
-        normal: bool = False
+        normal: bool = False,
     ):
         assert (
             version in self.valid_versions
@@ -345,7 +348,7 @@ class ActivityData(GraphDataset):
                     block_size=block_size,
                     sparsity=sparsity,
                     exists_ok=False,
-                    normal=normal
+                    normal=normal,
                 )
             else:
                 raise Exception(f"No preprocessing data available for {block_name=}")
@@ -412,7 +415,7 @@ def test_datareader():
         db_config=Path("./data/mongo_config.yaml"),
         version="test",
         create_preprocessing=True,
-        normal=True
+        normal=True,
     )
     print(len(test_obj))  # 1895393
     assert isinstance(len(test_obj), int)
