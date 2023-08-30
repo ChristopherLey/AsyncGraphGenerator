@@ -1,12 +1,10 @@
 data_params:
   block_size: 30
-  sparsity: 0.7
+  sparsity: 0.1
   db_config: "./Datasets/Localisation/data/mongo_config.yaml"
-  batch_size: 2000
-  num_workers: 14
-  subset: 0.3
-  train_length: 3276564
-  test_length: 820280
+  batch_size: 12000
+  num_workers: 7
+  subset: 0.5
 model_params:
   type: "Transformer"
   input_dim: 3

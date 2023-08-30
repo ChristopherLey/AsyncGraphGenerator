@@ -25,7 +25,7 @@ from typing import Optional
 import numpy as np
 import yaml
 from pymongo import MongoClient
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from tqdm import tqdm
 from tqdm import trange
 
@@ -95,15 +95,25 @@ graph_template: dict = {
     "attention_mask": [],
     "category_index": [],
 }
+scaler = {
+    'fields': ['X', 'Y', 'Z'],
+    'mean': [2.8113479961092374, 1.6968769404813713, 0.4182104464547134],
+    'std': [0.91622372110056, 0.4737676249131146, 0.3791233780673026],
+    'time': 32705408.0,
+    'type': 'Normal'
+}
 
 
-def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5):
+def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5, normal: bool=True):
     with open(config["data_root"], "r") as data_file:
         data_list = data_file.readlines()
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
     assert 0 < sparsity < 1.0
-    block_name = f"block_{block_size:02d}_{100*sparsity}%"
+    if normal:
+        block_name = f"block_{block_size:02d}_{100*sparsity}%_normal"
+    else:
+        block_name = f"block_{block_size:02d}_{100 * sparsity}%"
     existing_collections = db.list_collection_names(
         filter={"name": {"$regex": block_name}}
     )
@@ -136,21 +146,34 @@ def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5):
         parsed_data[key]["node_features"].append(features)
         feature_scaling.append(features)
         parsed_data[key]["category_index"].append(activity.index(data[7]))
-    scaler = MinMaxScaler()
+    if normal:
+        scaler = StandardScaler()
+    else:
+        scaler = MinMaxScaler()
     scaler.fit_transform(feature_scaling)
 
     block_data = db[block_name]
     test_block = block_data["test"]
     train_block = block_data["train"]
-    meta = {
-        "type": block_size,
-        "scaler": {
+    if normal:
+        scaler = {
+            "type": "Normal",
+            "fields": ["X", "Y", "Z"],
+            "mean": scaler.mean_.tolist(),
+            "std": scaler.scale_.tolist(),
+            "time": 32705408.0 * sparsity / 0.5,
+        }
+    else:
+        scaler = {
             "type": "MinMax",
             "fields": ["X", "Y", "Z"],
             "min": scaler.data_min_.tolist(),
             "max": scaler.data_max_.tolist(),
             "time": 32705408.0 * sparsity / 0.5,
-        },
+        }
+    meta = {
+        "type": block_size,
+        "scaler": scaler,
         "sparsity": sparsity,
         "type_index": tag_identifiers,
         "spatial_index": sequence_keys,
@@ -159,22 +182,34 @@ def decompose_data(config: dict, block_size: int, exists_ok=True, sparsity=0.5):
     block_data.insert_one(meta)
     indexes = {}
     for key, value in parsed_data.items():
-        removed = np.random.choice(
-            len(parsed_data[key]["time"]),
-            size=int(np.floor(len(parsed_data[key]["time"]) * sparsity)),
-            replace=False,
-        )
+        idx = np.arange(0, len(parsed_data[key]["time"]))
+        np.random.shuffle(idx)
+        subset_size = int(np.floor(len(parsed_data[key]["time"]) * sparsity))
+        removed = idx[:subset_size]
+        remainder = idx[subset_size:]
         removed.sort()
-        remainder_bool = np.array(
-            [i not in removed for i in range(len(parsed_data[key]["time"]))]
-        )
-        remainder = np.arange(len(parsed_data[key]["time"]))[remainder_bool]
-        test_index = np.random.choice(
-            removed.shape[0], size=removed.shape[0] // 5, replace=False
-        )
+        remainder.sort()
+        # removed = np.random.choice(
+        #     len(parsed_data[key]["time"]),
+        #     size=int(np.floor(len(parsed_data[key]["time"]) * sparsity)),
+        #     replace=False,
+        # )
+        # removed.sort()
+        # remainder_idx = np.array(
+        #     [i not in removed for i in range(len(parsed_data[key]["time"]))]
+        # )
+        # remainder = np.arange(len(parsed_data[key]["time"]))[remainder_idx]
+        removed_idx = np.arange(removed.shape[0])
+        np.random.shuffle(removed_idx)
+        test_index = removed_idx[:int(removed.shape[0] // 5)]
+        train_index = removed_idx[int(removed.shape[0] // 5):]
+        # test_index = np.random.choice(
+        #     removed.shape[0], size=removed.shape[0] // 5, replace=False
+        # )
         test_index.sort()
         test = removed[test_index]
-        train_index = np.array([i not in test_index for i in range(removed.shape[0])])
+        # train_index = np.array([i not in test_index for i in range(removed.shape[0])])
+        train_index.sort()
         train = removed[train_index]
         indexes[key] = {
             "removed": removed,
@@ -285,6 +320,7 @@ class ActivityData(GraphDataset):
         create_preprocessing: bool = False,
         shuffle: bool = False,
         subset: Optional[int] = None,
+        normal: bool = False
     ):
         assert (
             version in self.valid_versions
@@ -295,7 +331,10 @@ class ActivityData(GraphDataset):
             host=self.mongo_config["host"], port=self.mongo_config["port"]
         )
         db = mongo_db_client[self.mongo_config["base"]]
-        block_name = f"block_{block_size:02d}_{100 * sparsity}%"
+        if normal:
+            block_name = f"block_{block_size:02d}_{100 * sparsity}%_normal"
+        else:
+            block_name = f"block_{block_size:02d}_{100 * sparsity}%"
         if block_name not in db.list_collection_names():
             if create_preprocessing:
                 print(
@@ -306,6 +345,7 @@ class ActivityData(GraphDataset):
                     block_size=block_size,
                     sparsity=sparsity,
                     exists_ok=False,
+                    normal=normal
                 )
             else:
                 raise Exception(f"No preprocessing data available for {block_name=}")
@@ -368,9 +408,11 @@ class ActivityData(GraphDataset):
 def test_datareader():
     test_obj = ActivityData(
         block_size=30,
-        sparsity=0.9,
+        sparsity=0.5,
         db_config=Path("./data/mongo_config.yaml"),
         version="test",
+        create_preprocessing=True,
+        normal=True
     )
     print(len(test_obj))  # 1895393
     assert isinstance(len(test_obj), int)

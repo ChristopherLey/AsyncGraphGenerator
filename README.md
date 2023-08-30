@@ -31,7 +31,7 @@ called `pm25_config.yaml`
         <td> <img src="AGG_diagrams/time_series_matrix.png" width="200" title="Time Series Matrix"></td>
         <td><img src="AGG_diagrams/time_series_graph.png" width="200" title="Time series graph representation" ></td>
         <td><img src="AGG_diagrams/time_series_inputation.png" width="200" title="Node generation"></td>
-    </tr> 
+    </tr>
     <tr>
         <td><p>(a) Matrix time-series representation</p></td>
         <td><p style="width: 200px; word-wrap: anywhere">(b) An asynchronous directed graph representing the sparse time series data with minimal assumptions other than the causal nature of the samples.</p></td>

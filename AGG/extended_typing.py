@@ -81,7 +81,9 @@ class TargetNode(BaseModel):
     )(cast_2_long_tensor)
 
     @validator("category_index", pre=True)
-    def create_category_index(cls, v: Union[dict, LongTensor, FloatTensor], values: dict):
+    def create_category_index(
+        cls, v: Union[dict, LongTensor, FloatTensor], values: dict
+    ):
         if isinstance(v, LongTensor):
             entry = v
         elif isinstance(v, FloatTensor):
@@ -130,7 +132,9 @@ class ContinuousTimeGraphSample(BaseModel):
     )(cast_2_long_tensor)
 
     @validator("category_index", pre=True)
-    def create_category_index(cls, v: Union[dict, LongTensor, FloatTensor], values: dict):
+    def create_category_index(
+        cls, v: Union[dict, LongTensor, FloatTensor], values: dict
+    ):
         if isinstance(v, LongTensor):
             entry = v
         elif isinstance(v, FloatTensor):

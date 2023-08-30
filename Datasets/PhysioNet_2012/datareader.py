@@ -15,284 +15,247 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-from pathlib import Path
-from typing import Dict
 import copy
-from pymongo import MongoClient
-import numpy as np
+import math
+from pathlib import Path
 from random import randint
+from typing import Dict
+from typing import Optional
+
+import numpy as np
+import yaml
+from pymongo import MongoClient
 from tqdm import tqdm
 from tqdm import trange
-from typing import Optional
-import math
 
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.graph_dataset import GraphDataset
 
-import yaml
-
 params = {
-    'Age': {
-        'range': [15, 90.0]
-    },
-    'Gender': {
-        'categories': 2,
-        "range": [0, 1],
-        'minLimit': None,
-        'maxLimit': None
-    },
-    'Height': {
-        'range': [121.9, 462.3],
-        'minLimit': 100,
-        'maxLimit': 300
-    },
-    'ICUType': {
-        'categories': 4,
+    "Age": {"range": [15, 90.0]},
+    "Gender": {"categories": 2, "range": [0, 1], "minLimit": None, "maxLimit": None},
+    "Height": {"range": [121.9, 462.3], "minLimit": 100, "maxLimit": 300},
+    "ICUType": {
+        "categories": 4,
         "range": [1, 2, 3, 4],
-        'minLimit': None,
-        'maxLimit': None
+        "minLimit": None,
+        "maxLimit": None,
     },
-    'Weight': {
-        'range': [-1.0, 472.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 80.0,
-        'iqr': 76.3
+    "Weight": {
+        "range": [-1.0, 472.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 80.0,
+        "iqr": 76.3,
     },
-    'GCS': {
-        'range': [3.0, 15.0],
-        'minLimit': None,
-        'maxLimit': None
+    "GCS": {"range": [3.0, 15.0], "minLimit": None, "maxLimit": None},
+    "HR": {
+        "range": [0.0, 300.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 86.0,
+        "iqr": 60.0,
     },
-    'HR': {
-        'range': [0.0, 300.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 86.0,
-        'iqr': 60.0
+    "NIDiasABP": {
+        "range": [-1.0, 211.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 57.0,
+        "iqr": 51.0,
     },
-    'NIDiasABP': {
-        'range': [-1.0, 211.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 57.0,
-        'iqr': 51.0
+    "NIMAP": {
+        "range": [0.0, 228.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 75.33,
+        "iqr": 50.33,
     },
-    'NIMAP': {
-        'range': [0.0, 228.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 75.33,
-        'iqr': 50.33
+    "NISysABP": {
+        "range": [0.0, 300.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 117.0,
+        "iqr": 74.0,
     },
-    'NISysABP': {
-        'range': [0.0, 300.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 117.0,
-        'iqr': 74.0
+    "Temp": {
+        "range": [18.6, 42.2],
+        "minLimit": 0,
+        "maxLimit": None,
+        "median": 37.1,
+        "iqr": 2.799999999999997,
     },
-    'Temp': {
-        'range': [18.6, 42.2],
-        'minLimit': 0,
-        'maxLimit': None,
-        'median': 37.1,
-        'iqr': 2.799999999999997
+    "Urine": {
+        "range": [0.0, 1695.0],
+        "minLimit": None,
+        "maxLimit": 1700,
+        "median": 70.0,
+        "iqr": 368.0,
     },
-    'Urine': {
-        'range': [0.0, 1695.0],
-        'minLimit': None,
-        'maxLimit': 1700,
-        'median': 70.0,
-        'iqr': 368.0
+    "SaO2": {
+        "range": [0.0, 100.0],
+        "minLimit": 0,
+        "maxLimit": None,
+        "median": 97.0,
+        "iqr": 7.0,
     },
-    'SaO2': {
-        'range': [0.0, 100.0],
-        'minLimit': 0,
-        'maxLimit': None,
-        'median': 97.0,
-        'iqr': 7.0
+    "FiO2": {"range": [0.21, 1.0], "minLimit": None, "maxLimit": None},
+    "DiasABP": {
+        "range": [-1.0, 283.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 58.0,
+        "iqr": 41.0,
     },
-    'FiO2': {
-        'range': [0.21, 1.0],
-        'minLimit': None,
-        'maxLimit': None
+    "MAP": {
+        "range": [0.0, 300.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 77.0,
+        "iqr": 50.0,
     },
-    'DiasABP': {
-        'range': [-1.0, 283.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 58.0,
-        'iqr': 41.0
+    "SysABP": {"range": [0.0, 295.0], "minLimit": None, "maxLimit": None},
+    "pH": {
+        "range": [0, 14],
+        "minLimit": 0,
+        "maxLimit": 14,
+        "median": 7.38,
+        "iqr": 0.25,
     },
-    'MAP': {
-        'range': [0.0, 300.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 77.0,
-        'iqr': 50.0
+    "PaCO2": {"range": [0.0, 100.0], "minLimit": None, "maxLimit": None},
+    "PaO2": {"range": [0.0, 500.0], "minLimit": None, "maxLimit": None},
+    "MechVent": {"range": [0, 2], "minLimit": None, "maxLimit": None},
+    "BUN": {
+        "range": [0.0, 209.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 20.0,
+        "iqr": 67.0,
     },
-    'SysABP': {
-        'range': [0.0, 295.0],
-        'minLimit': None,
-        'maxLimit': None
+    "Creatinine": {
+        "range": [0.1, 22.1],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 1.0,
+        "iqr": 3.9000000000000004,
     },
-    'pH': {
-        'range': [0, 14],
-        'minLimit': 0,
-        'maxLimit': 14,
-        'median': 7.38,
-        'iqr': 0.25
+    "Glucose": {
+        "range": [8.0, 599.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 127.0,
+        "iqr": 166.0,
     },
-    'PaCO2': {
-        'range': [0.0, 100.0],
-        'minLimit': None,
-        'maxLimit': None
+    "HCO3": {"range": [5.0, 52.0], "minLimit": None, "maxLimit": None},
+    "HCT": {
+        "range": [5.0, 61.8],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 30.2,
+        "iqr": 16.400000000000002,
     },
-    'PaO2': {
-        'range': [0.0, 500.0],
-        'minLimit': None,
-        'maxLimit': None
+    "Mg": {
+        "range": [0.0, 4.9],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 2.0,
+        "iqr": 1.3000000000000003,
     },
-    'MechVent': {
-        'range': [0, 2],
-        'minLimit': None,
-        'maxLimit': None
+    "Platelets": {
+        "range": [5.0, 2292.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 172.0,
+        "iqr": 323.0,
     },
-    'BUN': {
-        'range': [0.0, 209.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 20.0,
-        'iqr': 67.0
+    "K": {
+        "range": [1.5, 13.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 4.1,
+        "iqr": 2.0999999999999996,
     },
-    'Creatinine': {
-        'range': [0.1, 22.1],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 1.0,
-        'iqr': 3.9000000000000004
+    "Na": {
+        "range": [98.0, 180.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 139.0,
+        "iqr": 16.0,
     },
-    'Glucose': {
-        'range': [8.0, 599.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 127.0,
-        'iqr': 166.0
+    "WBC": {
+        "range": [0.0, 528.0],
+        "minLimit": None,
+        "maxLimit": 529,
+        "median": 11.5,
+        "iqr": 20.299999999999997,
     },
-    'HCO3': {
-        'range': [5.0, 52.0],
-        'minLimit': None,
-        'maxLimit': None
+    "ALP": {
+        "range": [8.0, 4695.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 82.0,
+        "iqr": 263.0,
     },
-    'HCT': {
-        'range': [5.0, 61.8],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 30.2,
-        'iqr': 16.400000000000002
+    "ALT": {
+        "range": [1.0, 16920.0],
+        "minLimit": None,
+        "maxLimit": None,
+        "median": 42.0,
+        "iqr": 1893.0999999999985,
     },
-    'Mg': {
-        'range': [0.0, 4.9],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 2.0,
-        'iqr': 1.3000000000000003
-    },
-    'Platelets': {
-        'range': [5.0, 2292.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 172.0,
-        'iqr': 323.0
-    },
-    'K': {
-        'range': [1.5, 13.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 4.1,
-        'iqr': 2.0999999999999996
-    },
-    'Na': {
-        'range': [98.0, 180.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 139.0,
-        'iqr': 16.0
-    },
-    'WBC': {
-        'range': [0.0, 528.0],
-        'minLimit': None,
-        'maxLimit': 529,
-        'median': 11.5,
-        'iqr': 20.299999999999997
-    },
-    'ALP': {
-        'range': [8.0, 4695.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 82.0,
-        'iqr': 263.0
-    },
-    'ALT': {
-        'range': [1.0, 16920.0],
-        'minLimit': None,
-        'maxLimit': None,
-        'median': 42.0,
-        'iqr': 1893.0999999999985
-    },
-    'AST': {
-        'range': [4.0, 36400.0],
-        'minLimit': None,
-        'maxLimit': None
-    },
-    'Bilirubin': {
-        'range': [0.0, 82.8],
-        'minLimit': None,
-        'maxLimit': None
-    },
-    'RespRate': {
-        'range': [0.0, 100.0],
-        'minLimit': None,
-        'maxLimit': None
-    },
-    'Lactate': {
-        'range': [0.0, 31.0],
-        'minLimit': None,
-        'maxLimit': None
-    },
-    'Albumin': {
-        'range': [1.0, 5.3],
-        'minLimit': None,
-        'maxLimit': None
-    },
-    'TroponinT': {
-        'range': [0.01, 29.91],
-        'minLimit': None,
-        'maxLimit': None
-    },
-    'TroponinI': {
-        'range': [0.1, 49.6],
-        'minLimit': None,
-        'maxLimit': None
-    },
-    'Cholesterol': {
-        'range': [28.0, 362.0],
-        'minLimit': None,
-        'maxLimit': None
-    },
+    "AST": {"range": [4.0, 36400.0], "minLimit": None, "maxLimit": None},
+    "Bilirubin": {"range": [0.0, 82.8], "minLimit": None, "maxLimit": None},
+    "RespRate": {"range": [0.0, 100.0], "minLimit": None, "maxLimit": None},
+    "Lactate": {"range": [0.0, 31.0], "minLimit": None, "maxLimit": None},
+    "Albumin": {"range": [1.0, 5.3], "minLimit": None, "maxLimit": None},
+    "TroponinT": {"range": [0.01, 29.91], "minLimit": None, "maxLimit": None},
+    "TroponinI": {"range": [0.1, 49.6], "minLimit": None, "maxLimit": None},
+    "Cholesterol": {"range": [28.0, 362.0], "minLimit": None, "maxLimit": None},
 }
-types = ['Weight', 'GCS', 'HR', 'NIDiasABP', 'NIMAP', 'NISysABP', 'Temp', 'Urine', 'SaO2',
-       'FiO2', 'DiasABP', 'MAP', 'SysABP', 'pH', 'PaCO2', 'PaO2',
-       'MechVent', 'BUN', 'Creatinine', 'Glucose', 'HCO3', 'HCT', 'Mg',
-       'Platelets', 'K', 'Na', 'WBC', 'ALP', 'ALT', 'AST', 'Bilirubin',
-       'RespRate', 'Lactate', 'Albumin', 'TroponinT', 'TroponinI',
-       'Cholesterol', '<PAD>']
-Ignore = ['RecordID']
-spatial = ['ICUType']
-category = ['Age', 'Height', 'Gender']
+types = [
+    "Weight",
+    "GCS",
+    "HR",
+    "NIDiasABP",
+    "NIMAP",
+    "NISysABP",
+    "Temp",
+    "Urine",
+    "SaO2",
+    "FiO2",
+    "DiasABP",
+    "MAP",
+    "SysABP",
+    "pH",
+    "PaCO2",
+    "PaO2",
+    "MechVent",
+    "BUN",
+    "Creatinine",
+    "Glucose",
+    "HCO3",
+    "HCT",
+    "Mg",
+    "Platelets",
+    "K",
+    "Na",
+    "WBC",
+    "ALP",
+    "ALT",
+    "AST",
+    "Bilirubin",
+    "RespRate",
+    "Lactate",
+    "Albumin",
+    "TroponinT",
+    "TroponinI",
+    "Cholesterol",
+    "<PAD>",
+]
+Ignore = ["RecordID"]
+spatial = ["ICUType"]
+category = ["Age", "Height", "Gender"]
 
-max_time = 48*60.0
+max_time = 48 * 60.0
 unique_ICUType = [0, 1, 2, 3, 4]
 
 target_template: Dict[str, list] = {
@@ -351,13 +314,15 @@ normalisation = {
     "Cholesterol": {"mean": 155.678391959799, "std": 44.46017689352526},
 }
 
+
 def min_max(value: float, scale_range: list):
-    return (value - scale_range[0])/(scale_range[1] - scale_range[0])
+    return (value - scale_range[0]) / (scale_range[1] - scale_range[0])
 
 
 def parse_minutes(time_str: str) -> float:
-    hour, minute = time_str.split(':')
-    return float(hour)*60.0 + float(minute)
+    hour, minute = time_str.split(":")
+    return float(hour) * 60.0 + float(minute)
+
 
 def normalise_physionet(config: dict, exist_ok: bool = True):
     root_path = Path(config["data_root"])
@@ -367,43 +332,43 @@ def normalise_physionet(config: dict, exist_ok: bool = True):
     set_b = root_path / "set-b"
     set_c = root_path / "set-c"
     raw_datasets = [set_a, set_b, set_c]
-    scale_db = db['normalised_data']
+    scale_db = db["normalised_data"]
     db_len = scale_db.estimated_document_count()
     if not exist_ok and db_len > 0:
         scale_db.drop()
     print("Normalising physionet_data")
     for dir_loc in raw_datasets:
         for entry in dir_loc.iterdir():
-            with open(entry, 'r') as f:
+            with open(entry, "r") as f:
                 data_str_list: list[str] = f.readlines()
-            _, name, record_id = data_str_list[1][:-1].split(',')
+            _, name, record_id = data_str_list[1][:-1].split(",")
             record_id = int(record_id)
             graph_entry = copy.deepcopy(graph_template)
             assert name == "RecordID"
-            graph_entry['idx'] = record_id
+            graph_entry["idx"] = record_id
             category_entry = []
             spatial = None
             for i in range(2, len(data_str_list)):
-                t_str, target, feature_str = data_str_list[i][:-1].split(',')
+                t_str, target, feature_str = data_str_list[i][:-1].split(",")
                 if len(target) == 0:
                     print(f"empty entry {record_id=}, {i}: {data_str_list[i]}")
                     continue
                 if target == "ICUType":
                     spatial = int(feature_str)
                     continue
-                elif target == 'Age':
-                    scaler = params[target]['range']
+                elif target == "Age":
+                    scaler = params[target]["range"]
                     category_entry.append(min_max(float(feature_str), scaler))
                     continue
-                elif target == 'Gender':
+                elif target == "Gender":
                     category_entry.append(float(feature_str))
                     continue
-                elif target == 'Height':
+                elif target == "Height":
                     height = float(feature_str)
-                    scaler = params[target]['range']
-                    if height > params[target]['maxLimit']:
+                    scaler = params[target]["range"]
+                    if height > params[target]["maxLimit"]:
                         category_entry.append(1.0)
-                    elif height < params[target]['minLimit']:
+                    elif height < params[target]["minLimit"]:
                         if height >= 10:
                             category_entry.append(min_max(height * 10.0, scaler))
                         elif height <= 0:
@@ -416,20 +381,27 @@ def normalise_physionet(config: dict, exist_ok: bool = True):
                 feature = float(feature_str)
                 if math.isnan(feature):
                     continue
-                tau = (48*60.0 - parse_minutes(t_str))/(48*60.0)
+                tau = (48 * 60.0 - parse_minutes(t_str)) / (48 * 60.0)
                 if target in normalisation:
-                    feature = (feature - normalisation[target]['mean'])/normalisation[target]['std']
+                    feature = (feature - normalisation[target]["mean"]) / normalisation[
+                        target
+                    ]["std"]
                 else:
                     feature = feature
-                graph_entry['node_features'].append(feature)
-                graph_entry['time'].append(tau)
-                graph_entry['type_index'].append(types.index(target))
-            graph_entry['category_index'] = [category_entry, ]*len(graph_entry['node_features'])
-            graph_entry["spatial_index"] = [spatial, ]*len(graph_entry['node_features'])
-            if len(graph_entry['node_features']) <= 10:
-                print(graph_entry['idx'], len(graph_entry['node_features']))
+                graph_entry["node_features"].append(feature)
+                graph_entry["time"].append(tau)
+                graph_entry["type_index"].append(types.index(target))
+            graph_entry["category_index"] = [
+                category_entry,
+            ] * len(graph_entry["node_features"])
+            graph_entry["spatial_index"] = [
+                spatial,
+            ] * len(graph_entry["node_features"])
+            if len(graph_entry["node_features"]) <= 10:
+                print(graph_entry["idx"], len(graph_entry["node_features"]))
             else:
                 scale_db.insert_one(graph_entry)
+
 
 def scale_physionet(config: dict, exist_ok: bool = True):
     root_path = Path(config["data_root"])
@@ -439,42 +411,42 @@ def scale_physionet(config: dict, exist_ok: bool = True):
     set_b = root_path / "set-b"
     set_c = root_path / "set-c"
     raw_datasets = [set_a, set_b, set_c]
-    scale_db = db['scaled_data']
+    scale_db = db["scaled_data"]
     db_len = scale_db.estimated_document_count()
     if not exist_ok and db_len > 0:
         scale_db.drop()
     for dir_loc in raw_datasets:
         for entry in dir_loc.iterdir():
-            with open(entry, 'r') as f:
+            with open(entry, "r") as f:
                 data_str_list: list[str] = f.readlines()
-            _, name, record_id = data_str_list[1][:-1].split(',')
+            _, name, record_id = data_str_list[1][:-1].split(",")
             record_id = int(record_id)
             graph_entry = copy.deepcopy(graph_template)
             assert name == "RecordID"
-            graph_entry['idx'] = record_id
+            graph_entry["idx"] = record_id
             category_entry = []
             spatial = None
             for i in range(2, len(data_str_list)):
-                t_str, target, feature_str = data_str_list[i][:-1].split(',')
+                t_str, target, feature_str = data_str_list[i][:-1].split(",")
                 if len(target) == 0:
                     print(f"empty entry {record_id=}, {i}: {data_str_list[i]}")
                     continue
                 if target == "ICUType":
                     spatial = int(feature_str)
                     continue
-                elif target == 'Age':
-                    scaler = params[target]['range']
+                elif target == "Age":
+                    scaler = params[target]["range"]
                     category_entry.append(min_max(float(feature_str), scaler))
                     continue
-                elif target == 'Gender':
+                elif target == "Gender":
                     category_entry.append(float(feature_str))
                     continue
-                elif target == 'Height':
+                elif target == "Height":
                     height = float(feature_str)
-                    scaler = params[target]['range']
-                    if height > params[target]['maxLimit']:
+                    scaler = params[target]["range"]
+                    if height > params[target]["maxLimit"]:
                         category_entry.append(1.0)
-                    elif height < params[target]['minLimit']:
+                    elif height < params[target]["minLimit"]:
                         if height >= 10:
                             category_entry.append(min_max(height * 10.0, scaler))
                         elif height <= 0:
@@ -485,37 +457,48 @@ def scale_physionet(config: dict, exist_ok: bool = True):
                         category_entry.append(min_max(height, scaler))
                     continue
                 feature = float(feature_str)
-                if params[target]['minLimit'] is not None and feature < params[target]['minLimit']:
+                if (
+                    params[target]["minLimit"] is not None
+                    and feature < params[target]["minLimit"]
+                ):
                     continue
-                if params[target]['maxLimit'] is not None and feature > params[target]['maxLimit']:
+                if (
+                    params[target]["maxLimit"] is not None
+                    and feature > params[target]["maxLimit"]
+                ):
                     continue
-                tau = (48*60.0 - parse_minutes(t_str))/(48*60.0)
-                feature = min_max(feature, params[target]['range'])
-                graph_entry['node_features'].append(feature)
-                graph_entry['time'].append(tau)
-                graph_entry['type_index'].append(types.index(target))
-            graph_entry['category_index'] = [category_entry, ]*len(graph_entry['node_features'])
-            graph_entry["spatial_index"] = [spatial, ]*len(graph_entry['node_features'])
-            if len(graph_entry['node_features']) <= 10:
-                print(graph_entry['idx'], len(graph_entry['node_features']))
+                tau = (48 * 60.0 - parse_minutes(t_str)) / (48 * 60.0)
+                feature = min_max(feature, params[target]["range"])
+                graph_entry["node_features"].append(feature)
+                graph_entry["time"].append(tau)
+                graph_entry["type_index"].append(types.index(target))
+            graph_entry["category_index"] = [
+                category_entry,
+            ] * len(graph_entry["node_features"])
+            graph_entry["spatial_index"] = [
+                spatial,
+            ] * len(graph_entry["node_features"])
+            if len(graph_entry["node_features"]) <= 10:
+                print(graph_entry["idx"], len(graph_entry["node_features"]))
             else:
                 scale_db.insert_one(graph_entry)
 
+
 def decompose_physionet_data_interpolation(
-        config: dict,
-        block_size: int,
-        exists_ok: bool = False,
-        sparsity: float = 0.5,
-        skip_leq_block: bool = True,
-        normal: bool = False,
-        block_steps: int = 1
+    config: dict,
+    block_size: int,
+    exists_ok: bool = False,
+    sparsity: float = 0.5,
+    skip_leq_block: bool = True,
+    normal: bool = False,
+    block_steps: int = 1,
 ):
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
     if normal:
-        scale_db = db['normalised_data']
+        scale_db = db["normalised_data"]
     else:
-        scale_db = db['scaled_data']
+        scale_db = db["scaled_data"]
     if scale_db.estimated_document_count() == 0:
         if normal:
             normalise_physionet(config)
@@ -528,9 +511,12 @@ def decompose_physionet_data_interpolation(
     else:
         block_name = f"block_{block_size:02d}_{100 * sparsity}%"
     block_db = db[block_name]
-    test_block = block_db['test']
-    train_block = block_db['train']
-    if test_block.estimated_document_count() > 0 and train_block.estimated_document_count() > 0:
+    test_block = block_db["test"]
+    train_block = block_db["train"]
+    if (
+        test_block.estimated_document_count() > 0
+        and train_block.estimated_document_count() > 0
+    ):
         if exists_ok:
             return
         else:
@@ -538,16 +524,16 @@ def decompose_physionet_data_interpolation(
             test_block.drop()
             block_db.drop()
     meta = {
-        'type_index': types,
-        'scaling': params,
-        'spatial_index': unique_ICUType,
-        'spatial': spatial,
-        'category': category,
-        'time': max_time,
-        'normal': normal,
+        "type_index": types,
+        "scaling": params,
+        "spatial_index": unique_ICUType,
+        "spatial": spatial,
+        "category": category,
+        "time": max_time,
+        "normal": normal,
     }
     if normal:
-        meta['normalisation'] = normalisation
+        meta["normalisation"] = normalisation
     block_db.insert_one(meta)
     indexes = {}
     for entry in data_cursor:
@@ -557,9 +543,7 @@ def decompose_physionet_data_interpolation(
             replace=False,
         )
         removed.sort()
-        remainder_bool = np.array(
-            [i not in removed for i in range(len(entry["time"]))]
-        )
+        remainder_bool = np.array([i not in removed for i in range(len(entry["time"]))])
         remainder = np.arange(len(entry["time"]))[remainder_bool]
         test_index = np.random.choice(
             removed.shape[0], size=removed.shape[0] // 5, replace=False
@@ -568,7 +552,7 @@ def decompose_physionet_data_interpolation(
         test = removed[test_index]
         train_index = np.array([i not in test_index for i in range(removed.shape[0])])
         train = removed[train_index]
-        indexes[entry['idx']] = {
+        indexes[entry["idx"]] = {
             "removed": removed,
             "remainder": remainder,
             "train": train,
@@ -578,32 +562,43 @@ def decompose_physionet_data_interpolation(
     train_sample_count = 0
     for idx, index in tqdm(indexes.items()):
         data = scale_db.find_one({"idx": {"$eq": idx}})
-        if index['remainder'].shape[0] < block_size:
+        if index["remainder"].shape[0] < block_size:
             if skip_leq_block:
                 continue
-            input_index = index['remainder']
-            padding_size = block_size - index['remainder'].shape[0]
+            input_index = index["remainder"]
+            padding_size = block_size - index["remainder"].shape[0]
             graph = copy.deepcopy(graph_template)
-            graph['node_features'] = np.array(data['node_features'])[input_index]
-            graph['node_features'] = np.pad(graph['node_features'], (0, padding_size), 'constant')
-            graph['node_features'] = graph['node_features'].tolist()
+            graph["node_features"] = np.array(data["node_features"])[input_index]
+            graph["node_features"] = np.pad(
+                graph["node_features"], (0, padding_size), "constant"
+            )
+            graph["node_features"] = graph["node_features"].tolist()
             graph["key_padding_mask"] = (
-                    np.pad(np.ones_like(index['remainder']), (0, padding_size), 'constant') != 1
+                np.pad(np.ones_like(index["remainder"]), (0, padding_size), "constant")
+                != 1
             ).tolist()
             time = np.array(data["time"])[input_index]
             relative_time = time.min()
-            graph['time'] = np.pad((time - relative_time), (0, padding_size), 'constant', constant_values=0).tolist()
-            graph['type_index'] = np.pad(
-                np.array(data['type_index'])[input_index],
-                (0, padding_size),
-                'constant',
-                constant_values=(len(types)-1)
+            graph["time"] = np.pad(
+                (time - relative_time), (0, padding_size), "constant", constant_values=0
             ).tolist()
-            graph['spatial_index'] = np.pad(np.array(data['spatial_index'])[input_index], (0, padding_size)).tolist()
-            graph['category_index'] = np.pad(np.array(data['category_index'])[input_index],
-                                             ((0, padding_size), (0,  0))).tolist()
-            assert len(graph['category_index']) == block_size and len(graph['category_index'][0]) == 3, \
-                f"{graph['category_index'].shape=}"
+            graph["type_index"] = np.pad(
+                np.array(data["type_index"])[input_index],
+                (0, padding_size),
+                "constant",
+                constant_values=(len(types) - 1),
+            ).tolist()
+            graph["spatial_index"] = np.pad(
+                np.array(data["spatial_index"])[input_index], (0, padding_size)
+            ).tolist()
+            graph["category_index"] = np.pad(
+                np.array(data["category_index"])[input_index],
+                ((0, padding_size), (0, 0)),
+            ).tolist()
+            assert (
+                len(graph["category_index"]) == block_size
+                and len(graph["category_index"][0]) == 3
+            ), f"{graph['category_index'].shape=}"
             write_data = []
             test_set = index["test"]
             for i in range(test_set.shape[0]):
@@ -657,29 +652,35 @@ def decompose_physionet_data_interpolation(
             if len(write_data) > 0:
                 train_block.insert_many(write_data)
         else:
-            for n in trange(0, index['remainder'].shape[0] - block_size, block_steps):
-                input_index = index['remainder'][n:(n+block_size)]
+            for n in trange(0, index["remainder"].shape[0] - block_size, block_steps):
+                input_index = index["remainder"][n : (n + block_size)]
                 graph = copy.deepcopy(graph_template)
-                graph['node_features'] = np.array(data['node_features'])[input_index].tolist()
+                graph["node_features"] = np.array(data["node_features"])[
+                    input_index
+                ].tolist()
                 graph["key_padding_mask"] = (
-                        np.zeros_like(np.array(data["type_index"])[input_index]) != 0
+                    np.zeros_like(np.array(data["type_index"])[input_index]) != 0
                 ).tolist()
                 time = np.array(data["time"])[input_index]
                 relative_time = time.min()
-                graph['time'] = (time - relative_time).tolist()
-                graph['type_index'] = np.array(data['type_index'])[input_index].tolist()
-                graph['spatial_index'] = np.array(data['spatial_index'])[input_index].tolist()
-                graph['category_index'] = np.array(data['category_index'])[input_index].tolist()
+                graph["time"] = (time - relative_time).tolist()
+                graph["type_index"] = np.array(data["type_index"])[input_index].tolist()
+                graph["spatial_index"] = np.array(data["spatial_index"])[
+                    input_index
+                ].tolist()
+                graph["category_index"] = np.array(data["category_index"])[
+                    input_index
+                ].tolist()
                 train_mask = (index["train"] > input_index.min()) & (
-                        index["train"] < input_index.max()
+                    index["train"] < input_index.max()
                 )
                 test_mask = (index["test"] > input_index.min()) & (
-                        index["test"] < input_index.max()
+                    index["test"] < input_index.max()
                 )
                 test_set = index["test"][test_mask]
                 write_data = []
                 for i in range(test_set.shape[0]):
-                    if test_set[i] == types.index('MechVent'):
+                    if test_set[i] == types.index("MechVent"):
                         continue
                     graph_sample = copy.deepcopy(graph)
                     target = copy.deepcopy(target_template)
@@ -707,7 +708,7 @@ def decompose_physionet_data_interpolation(
                 train_set = index["train"][train_mask]
                 write_data = []
                 for i in range(train_set.shape[0]):
-                    if train_set[i] == types.index('MechVent'):
+                    if train_set[i] == types.index("MechVent"):
                         continue
                     graph_sample = copy.deepcopy(graph)
                     target = copy.deepcopy(target_template)
@@ -739,20 +740,20 @@ class ICUData(GraphDataset):
     valid_versions = ["train", "test"]
 
     def __init__(
-            self,
-            block_size: int,
-            sparsity: float,
-            db_config: Path,
-            version: str = "train",
-            create_preprocessing: bool = True,
-            shuffle: bool = False,
-            subset: Optional[int] = None,
-            skip_leq_block: bool = False,
-            normal: bool = True,
-            force_preprocessing: bool = False
+        self,
+        block_size: int,
+        sparsity: float,
+        db_config: Path,
+        version: str = "train",
+        create_preprocessing: bool = True,
+        shuffle: bool = False,
+        subset: Optional[int] = None,
+        skip_leq_block: bool = False,
+        normal: bool = True,
+        force_preprocessing: bool = False,
     ):
         assert (
-                version in self.valid_versions
+            version in self.valid_versions
         ), f"{version=} is not a valid version, valid version include {self.valid_versions}"
         with open(db_config, "r") as f:
             self.mongo_config: dict = yaml.safe_load(f)
@@ -776,7 +777,7 @@ class ICUData(GraphDataset):
                     exists_ok=False,
                     normal=normal,
                     skip_leq_block=skip_leq_block,
-                    block_steps=5
+                    block_steps=5,
                 )
             else:
                 raise Exception(f"No preprocessing data available for {block_name=}")
@@ -790,8 +791,8 @@ class ICUData(GraphDataset):
         self.meta_data = db_handle.find_one({})
         self.spatial_index = self.meta_data.pop("spatial_index")
         self.type_index = self.meta_data.pop("type_index")
-        if self.type_index[-1] != '<PAD>':
-            self.type_index.append('<PAD>')
+        if self.type_index[-1] != "<PAD>":
+            self.type_index.append("<PAD>")
         db_split = db_handle[self.split]
         print(f"Creating index for {db_split}...")
         db_split.create_index("idx")
@@ -844,9 +845,9 @@ if __name__ == "__main__":
         block_size=100,
         sparsity=0.7,
         db_config=Path("./data/mongo_config.yaml"),
-        version='train',
+        version="train",
         force_preprocessing=False,
-        skip_leq_block=False
+        skip_leq_block=False,
     )
     print(len(test_obj))  # 11701077
     assert isinstance(len(test_obj), int)

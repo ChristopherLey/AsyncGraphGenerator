@@ -20,8 +20,8 @@ repos:
     rev: v3.1.0
     hooks:
     -   id: reorder-python-imports
--   repo: https://gitlab.com/pycqa/flake8
-    rev: 3.9.2
+-   repo: https://github.com/PyCQA/flake8
+    rev: 6.1.0
     hooks:
     -   id: flake8
         args:

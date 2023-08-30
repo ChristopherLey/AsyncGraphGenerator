@@ -15,14 +15,17 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+import io
 from copy import deepcopy
-from typing import Tuple
 from pathlib import Path
+from typing import Tuple
+
 import matplotlib
 import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 import seaborn as sns
 import torch
+from PIL import Image
 from torch import nn
 from torch.optim import Adam
 from torchmetrics import MeanAbsoluteError
@@ -30,8 +33,6 @@ from torchmetrics import MeanSquaredError
 from torchmetrics import R2Score
 from torchvision import transforms
 from torchvision.utils import save_image
-import io
-from PIL import Image
 
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
@@ -295,7 +296,6 @@ class AGGExperiment_Activity(pl.LightningModule):
         # )
         return loss.detach().to("cpu"), y_hat.detach().to("cpu")
 
-
     def configure_optimizers(self) -> torch.optim.Optimizer:
         optimiser = Adam(self.agg.parameters(), lr=self.optimiser_params["lr"])
         lr_scheduler = torch.optim.lr_scheduler.LinearLR(
@@ -309,6 +309,7 @@ class AGGExperiment_Activity(pl.LightningModule):
         # fmt: off
         return [optimiser, ], [lr_scheduler, ]
         # fmt: on
+
 
 class AGGExperiment_ICU(pl.LightningModule):
     def __init__(
@@ -440,11 +441,13 @@ class AGGExperiment_ICU(pl.LightningModule):
         plt.hist(errors, bins=200, label=f"Errors{type}\n RMSE: {rmse}")
         plt.legend()
         plt.subplot(1, 2, 2)
-        plt.hist(y_scaled, bins=200, label=f'{type} data distribution')
+        plt.hist(y_scaled, bins=200, label=f"{type} data distribution")
         plt.legend()
-        plt.savefig(Path('./lightning_logs') / self.logger.version / f'{type}.png', bbox_inches='tight')
+        plt.savefig(
+            Path("./lightning_logs") / self.logger.version / f"{type}.png",
+            bbox_inches="tight",
+        )
         plt.close()
-
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         optimiser = Adam(self.agg.parameters(), lr=self.optimiser_params["lr"])

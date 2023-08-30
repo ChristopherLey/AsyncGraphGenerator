@@ -82,6 +82,7 @@ def main():
             db_config=Path(config["data_params"]["db_config"]),
             create_preprocessing=True,
             version="train",
+            normal=True
         )
         train_length = len(train_reader)
         subset = floor(train_length * config["data_params"]["subset"])
@@ -98,6 +99,7 @@ def main():
         version="train",
         subset=subset,
         shuffle=shuffle,
+        normal=True
     )
     train_dataloader = DataLoader(
         train_reader,
@@ -112,6 +114,7 @@ def main():
         sparsity=config["data_params"]["sparsity"],
         db_config=Path(config["data_params"]["db_config"]),
         version="test",
+        normal=True
     )
     val_dataloader = DataLoader(
         val_reader,
@@ -149,7 +152,8 @@ def main():
 
     callbacks = [mse_callback, mae_callback]
 
-    version_path = f"AGG-active-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
+    version_path = (f"AGG-activity_{int(config['data_params']['sparsity'] * 100)}%_"
+                    f"inter-{datetime.now().strftime('%d-%m_%H:%M:%S')}")
 
     tb_logger = pl_loggers.TensorBoardLogger(
         save_dir=".",
@@ -164,7 +168,6 @@ def main():
         max_epochs=1000,
         log_every_n_steps=1,
         gradient_clip_val=1.0,
-        resume_from_checkpoint=ckpt_path,
     )
 
     pprint(config)
@@ -175,7 +178,7 @@ def main():
     with open(log_path / "config.yaml", "w") as yml_file:
         yaml.dump(config, yml_file, default_flow_style=False)
 
-    trainer.fit(model, train_dataloader, val_dataloader)
+    trainer.fit(model, train_dataloader, val_dataloader, ckpt_path=ckpt_path)
 
 
 if __name__ == "__main__":
