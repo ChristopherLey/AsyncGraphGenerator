@@ -250,12 +250,13 @@ def normalise(feature, scaling):
 
 
 def random_index(data_len: int, sparsity: float):
-    removed = np.random.choice(
-        data_len, size=int(np.floor(data_len * sparsity)), replace=False
-    )
+    idx = np.arange(0, data_len)
+    subset_size = int(np.floor(data_len) * sparsity)
+    np.random.shuffle(idx)
+    removed = idx[:subset_size]
+    remainder = idx[subset_size:]
     removed.sort()
-    remainder_bool = np.array([i not in removed for i in trange(data_len)])
-    remainder = np.arange(data_len)[remainder_bool]
+    remainder.sort()
     return removed, remainder
 
 
@@ -293,7 +294,14 @@ def create_indexes(
 
 
 def create_data_block(
-    index, raw, block_size, n, time_scale, only_pm25, params, sample_count
+    index: dict,
+    raw: list,
+    block_size: int,
+    n: int,
+    time_scale: float,
+    only_pm25: bool,
+    params,
+    sample_count: int,
 ):
     write_data = []
     input_index = index["remainder"][n : (n + block_size)]

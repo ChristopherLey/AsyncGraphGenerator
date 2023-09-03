@@ -1,150 +1,195 @@
-import copy
 from pathlib import Path
+from typing import Dict
 
+import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 import torch
 import yaml
 from pymongo import MongoClient
+from tqdm import tqdm
+from tqdm import trange
 
+from AGG.extended_typing import collate_graph_samples
+from AGG.extended_typing import ContinuousTimeGraphSample
+from AGG.graph_dataset import GraphDataset
 from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
+from Datasets.Beijing.datareader import create_data_block
 from Datasets.Beijing.datareader import features
-from Datasets.Beijing.datareader import graph_template
-from Datasets.Beijing.datareader import normalise
-from Datasets.Beijing.datareader import target_template
+from Datasets.Beijing.datareader import random_index
 from Datasets.Beijing.datareader import test_masks
+from Datasets.Beijing.datareader import training_masks
+from Datasets.Beijing.datareader import unique_stations
 
-best_model_path = Path()
-assert best_model_path.exists()
-checkpoint = torch.load(best_model_path)
+sns.set()
 
-model_state_dict = checkpoint["state_dict"]
-config_path = best_model_path.parent.parent / "config.yaml"
-with open(config_path, "r") as f:
-    config = yaml.safe_load(f)
+figure_path = Path("AGG_diagrams")
+model_path = Path("lightning_logs/AGG-kdd_30%_inter-25-08_23:22:17")
+model_config_path = model_path / "config.yaml"
+best_checkpoint = (
+    model_path / "checkpoints" / "model-epoch=05-val_RMSE_epoch=0.157463.ckpt"
+)
+checkpoint = torch.load(best_checkpoint)
+# Load the config file
+with open(model_config_path, "r") as f:
+    config: dict = yaml.safe_load(f)
+# Load the config file
+with open("Datasets/Beijing/data/mongo_config.yaml", "r") as f:
+    mongo_config: dict = yaml.safe_load(f)
 
-if "type" in config["model_params"]:
-    config["model_params"].pop("type")
-
-agg = AsynchronousGraphGeneratorTransformer(**config["model_params"])
-agg.load_state_dict(model_state_dict)
-
-db_config_path = Path(config["data_params"]["db_config"])
-with open(db_config_path) as f:
-    db_config = yaml.safe_load(f)
-mongo_db_client = MongoClient(host=db_config["host"], port=db_config["port"])
-db = mongo_db_client[db_config["base"]]
+# Connect to the database
+mongo_db_client = MongoClient(host=mongo_config["host"], port=mongo_config["port"])
+db = mongo_db_client[mongo_config["base"]]
 db_params = db["param"]
 params = db_params.find_one({})
-db_raw = db["raw"]
-block_name = f'block_{config["data_params"]["block_size"]:02d}_{100 * config["data_params"]["sparsity"]}%_pm25'
-index_entry = db[block_name]["indexes"]["test"]
+time_scale = 3600 * 72
+# Get the date range
+date_range = (training_masks[0][0], test_masks[0][1])
 
-raw_test = list(
-    db_raw.find({"time": {"$gt": test_masks[0][0], "$lt": test_masks[0][1]}}).sort(
-        "time"
-    )
-)
-idx = np.arange(0, len(raw_test))
-np.random.shuffle(idx)
-subset_size = idx.shape[0] // 2
-removed = idx[:subset_size]
-remainder = idx[subset_size:]
-removed.sort()
-remainder.sort()
-samples: list = []
-time_scale: int = 3600 * 72
+# Get the data from the database
+sparsity = 0.3
 block_size = config["data_params"]["block_size"]
-write_data = []
-for n in range(0, len(remainder) - block_size, block_size):
-    input_index = remainder[n : (n + block_size)]
-    max_time = raw_test[input_index[-1]]["time"]
-    graph = copy.deepcopy(graph_template)
-    for k in range(input_index.shape[0]):
-        raw_entry = raw_test[input_index[k]]
-        graph["node_features"].append(
-            normalise(
-                raw_entry["node_features"],
-                params["scaling"][features[raw_entry["type_index"]]],
-            )
-        )
-        graph["time"].append(
-            (max_time - raw_entry["time"]).total_seconds() / time_scale
-        )
-        graph["category_index"].append(raw_entry["category_index"])
-        graph["type_index"].append(raw_entry["type_index"])
-        graph["spatial_index"].append(raw_entry["spatial_index"])
-    graph["key_padding_mask"] = (np.zeros_like(input_index) != 0).tolist()
-    mask = (removed > min(input_index)) & (removed < max(input_index))
-    test_target = removed[mask]
-    for i in range(test_target.shape[0]):
-        k = test_target[i]
-        graph_sample = copy.deepcopy(graph)
-        target = copy.deepcopy(target_template)
-        if raw_test[k]["type_index"] == 0:
-            feature_type = features[raw_test[k]["type_index"]]
-            target["features"] = [
-                normalise(
-                    raw_test[k]["node_features"], params["scaling"][feature_type]
-                ),
-            ]
-            target["type_index"] = [
-                raw_test[k]["type_index"],
-            ]
-            target["spatial_index"] = [
-                raw_test[k]["spatial_index"],
-            ]
-            target["category_index"] = [
-                raw_test[k]["category_index"],
-            ]
-            target["time"] = [
-                (max_time - raw_test[k]["time"]).total_seconds() / time_scale,
-            ]
-            graph_sample["target"] = target
-            graph_sample["datetime"] = raw_test[k]["time"]
-            write_data.append(graph_sample)
+raw_data = list(
+    db["raw"]
+    .find({"time": {"$gte": date_range[0], "$lte": date_range[1]}})
+    .sort("time")
+)
+removed, remainder = random_index(len(raw_data), sparsity)
+data_set = []
+sample_count = 0
+for n in trange(0, remainder.shape[0] - block_size, block_size):
+    write_data, sample_count = create_data_block(
+        {
+            "remainder": remainder,
+            "removed": removed,
+        },
+        raw_data,
+        block_size,
+        n,
+        time_scale,
+        True,
+        params,
+        sample_count,
+    )
+    if len(write_data) > 0:
+        data_set.append(write_data)
 
+config["model_params"].pop("type")
+agg = AsynchronousGraphGeneratorTransformer(**config["model_params"])
+agg.load_state_dict(checkpoint["state_dict"])
+agg.eval()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-# mini_batch_size = 20
-# agg = agg.to(device)
-# agg.eval()
-# pm25_list = []
-# error_list = []
-# time_list = []
-# ground_truth = []
-# spatial_index = []
-# with torch.no_grad():
-#     for mini_batch_idx in range(0, len(samples), mini_batch_size):
-#         if mini_batch_idx + 10 < len(samples):
-#             mini_batch = samples[mini_batch_idx:(mini_batch_idx + mini_batch_size)]
-#         else:
-#             mini_batch = samples[mini_batch_idx:]
-#         graph = collate_graph_samples(mini_batch)
-#         y_hat, attention_list = agg(graph, device=device)
-#         pm25_list.append(y_hat.to('cpu'))
-#         ground_truth.append(graph.target.features)
-#         spatial_index.append(graph.target.spatial_index)
-#         error_list.append(torch.abs(graph.target.features.to(device) - y_hat).to('cpu'))
-#         time_list.append(graph.target.time)
-#
-#     time = torch.cat(time_list, dim=0).flatten().numpy()
-#     pm25_est = torch.cat(pm25_list, dim=0).flatten().numpy()
-#     error = torch.cat(error_list, dim=0).flatten().numpy()
-#     ground_truth = torch.cat(ground_truth, dim=0).flatten().numpy()
-#     spatial_index = torch.cat(spatial_index, dim=0).flatten().numpy()
-#     sample_mask = sample.type_index == 0
-#     sample_pm25 = sample.node_features[sample_mask].numpy()
-#     sample_time = sample.time[sample_mask]
-#     sample_max = sample_time.max()
-#     sample_time = (sample_max - sample_time).numpy()
-#     sample_spatial = sample.spatial_index[sample_mask].numpy()
-#     time = sample_max - time
-#
-# plt.figure()
-# location = 0
-# slice = spatial_index == location
-# plt.plot(time[slice], ground_truth[slice], 'xk', label='ground truth')
-# plt.plot(time[slice], pm25_est[slice], '.r', label='AGG estimate')
-# plt.plot(sample_time[sample_spatial == location], sample_pm25[sample_spatial == location], '--go', label='input pm25')
-# plt.legend()
-# plt.show()
+agg = agg.to(device)
+
+
+def create_batch(data_set: list) -> ContinuousTimeGraphSample:
+    batch = []
+    for data in data_set:
+        graph = GraphDataset.graph_transform(data)
+        batch.append(graph)
+    return collate_graph_samples(batch)
+
+
+time_series: Dict[str, dict] = {
+    station: {
+        "input": [],
+        "time": [],
+        "pm25_est": [],
+        "pm25": [],
+        "est_time": [],
+    }
+    for station in unique_stations
+}
+max_time = 0
+with torch.no_grad():
+    for data in tqdm(data_set):
+        type_index = np.array(data[0]["type_index"])
+        type_bool = type_index == features.index("PM2.5")
+        pm25_feature = np.array(data[0]["node_features"])[type_bool]
+        pm25_spacial = np.array(data[0]["spatial_index"])[type_bool]
+        pm25_time = np.array(data[0]["time"])[type_bool]
+        max_time += pm25_time.max()
+        pm25_time = max_time - pm25_time
+
+        for i, station in enumerate(unique_stations):
+            station_bool = pm25_spacial == i
+            time_series[station]["input"].append(pm25_feature[station_bool])
+            time_series[station]["time"].append(pm25_time[station_bool])
+        if len(data) > config["data_params"]["batch_size"]:
+            for n in range(0, len(data), config["data_params"]["batch_size"]):
+                last_point = n + config["data_params"]["batch_size"]
+                if last_point >= len(data):
+                    subset = data[n:last_point]
+                else:
+                    subset = data[n:last_point]
+                graph = create_batch(subset)
+                y_hat, attention_list = agg(graph, device=device)
+                y_hat = y_hat.to("cpu")
+                target_feature = graph.target.features
+                target_time = max_time - graph.target.time
+                for i, station in enumerate(unique_stations):
+                    station_bool = graph.target.spatial_index == i
+                    time_series[station]["pm25_est"].append(y_hat[station_bool].numpy())
+                    time_series[station]["pm25"].append(
+                        target_feature[station_bool].numpy()
+                    )
+                    time_series[station]["est_time"].append(
+                        target_time[station_bool].numpy()
+                    )
+        else:
+            graph = create_batch(data)
+            y_hat, attention_list = agg(graph, device=device)
+            y_hat = y_hat.to("cpu")
+            target_feature = graph.target.features
+            target_time = max_time - graph.target.time
+            for i, station in enumerate(unique_stations):
+                station_bool = graph.target.spatial_index == i
+                time_series[station]["pm25_est"].append(y_hat[station_bool].numpy())
+                time_series[station]["pm25"].append(
+                    target_feature[station_bool].numpy()
+                )
+                time_series[station]["est_time"].append(
+                    target_time[station_bool].numpy()
+                )
+for station in unique_stations:
+    time_series[station]["input"] = np.concatenate(
+        time_series[station]["input"], axis=0
+    )
+    time_series[station]["time"] = np.concatenate(time_series[station]["time"], axis=0)
+    time_series[station]["pm25_est"] = np.concatenate(
+        time_series[station]["pm25_est"], axis=0
+    )
+    time_series[station]["pm25"] = np.concatenate(time_series[station]["pm25"], axis=0)
+    time_series[station]["est_time"] = np.concatenate(
+        time_series[station]["est_time"], axis=0
+    )
+    plt.figure(figsize=(20, 10), dpi=300)
+    plt.plot(
+        time_series[station]["time"] * 72,
+        time_series[station]["input"],
+        "-.",
+        c="g",
+        lw=3,
+        label="Input",
+    )
+    plt.plot(
+        time_series[station]["est_time"] * 72,
+        time_series[station]["pm25_est"],
+        "o",
+        c="r",
+        label="Estimate",
+    )
+    plt.plot(
+        time_series[station]["est_time"] * 72,
+        time_series[station]["pm25"],
+        "*",
+        c="k",
+        label="Target",
+    )
+    plt.legend()
+    plt.xlabel("Time (h)")
+    plt.ylabel("PM2.5")
+    plt.title(f"PM2.5 at {station} with sparsity={sparsity*100:2g}%")
+    plt.savefig(figure_path / f"pm25_{station}_{sparsity*100:2g}%.png")
+    plt.close()

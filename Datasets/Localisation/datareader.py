@@ -192,26 +192,12 @@ def decompose_data(
         remainder = idx[subset_size:]
         removed.sort()
         remainder.sort()
-        # removed = np.random.choice(
-        #     len(parsed_data[key]["time"]),
-        #     size=int(np.floor(len(parsed_data[key]["time"]) * sparsity)),
-        #     replace=False,
-        # )
-        # removed.sort()
-        # remainder_idx = np.array(
-        #     [i not in removed for i in range(len(parsed_data[key]["time"]))]
-        # )
-        # remainder = np.arange(len(parsed_data[key]["time"]))[remainder_idx]
         removed_idx = np.arange(removed.shape[0])
         np.random.shuffle(removed_idx)
         test_index = removed_idx[: int(removed.shape[0] // 5)]
         train_index = removed_idx[int(removed.shape[0] // 5) :]
-        # test_index = np.random.choice(
-        #     removed.shape[0], size=removed.shape[0] // 5, replace=False
-        # )
         test_index.sort()
         test = removed[test_index]
-        # train_index = np.array([i not in test_index for i in range(removed.shape[0])])
         train_index.sort()
         train = removed[train_index]
         indexes[key] = {
