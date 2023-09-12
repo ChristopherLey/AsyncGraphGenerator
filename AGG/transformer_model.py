@@ -163,6 +163,8 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         dropout: float = 0.2,
         query_includes_categorical: bool = False,
         categorical_input: Optional[int] = None,
+        query_includes_type: bool = True,
+        transfer_learning: bool = False,
     ):
         super().__init__()
         self.node_feature_dim = (
@@ -173,19 +175,26 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             + categorical_embedding_dim
         )
         self.feature_projection = nn.Linear(input_dim, feature_dim)
+        self.query_includes_type = query_includes_type
         if query_includes_categorical:
             self.query_includes_categorical = True
-            self.query_dim = (
-                time_embedding_dim
-                + type_embedding_dim
-                + spatial_embedding_dim
-                + categorical_embedding_dim
-            )
+            if query_includes_type:
+                self.query_dim = (
+                    time_embedding_dim
+                    + type_embedding_dim
+                    + spatial_embedding_dim
+                    + categorical_embedding_dim
+                )
+            else:
+                self.query_dim = (
+                    time_embedding_dim + spatial_embedding_dim + categorical_embedding_dim
+                )
         else:
             self.query_includes_categorical = False
-            self.query_dim = (
-                time_embedding_dim + type_embedding_dim + spatial_embedding_dim
-            )
+            if query_includes_type:
+                self.query_dim = time_embedding_dim + type_embedding_dim + spatial_embedding_dim
+            else:
+                self.query_dim = time_embedding_dim + spatial_embedding_dim
         self.time_embed = Time2Vec(time_embedding_dim)
         self.type_embed = nn.Embedding(num_node_types, type_embedding_dim)
         self.spatial_embed = nn.Embedding(num_spatial_components, spatial_embedding_dim)
@@ -222,6 +231,9 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             output_size=input_dim,
             dropout=dropout,
         )
+        if transfer_learning:
+            self.valid_state_names.remove('head')
+            self.valid_state_names.remove('cross_attention')
 
     def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True):
         new_state_dict = {}
@@ -263,9 +275,13 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         )
         query_list = [
             self.time_embed(graph.target.time.unsqueeze(-1).to(device)),
-            self.type_embed(graph.target.type_index.to(device)),
             self.spatial_embed(graph.target.spatial_index.to(device)),
         ]
+        if self.query_includes_type and isinstance(
+            graph.target.type_index, (torch.LongTensor, torch.FloatTensor)
+        ):
+            type_encode = self.type_embed(graph.target.type_index.to(device))
+            query_list.append(type_encode)
         if self.query_includes_categorical and isinstance(
             graph.target.category_index, (torch.LongTensor, torch.FloatTensor)
         ):

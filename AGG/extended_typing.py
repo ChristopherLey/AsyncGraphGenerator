@@ -61,15 +61,12 @@ def cast_2_long_tensor(v: Union[list, LongTensor], values: dict, field: ModelFie
 
 
 class TargetNode(BaseModel):
-    features: FloatTensor
-    type_index: LongTensor
+    features: Union[LongTensor, FloatTensor]
+    type_index: Optional[LongTensor]
     time: FloatTensor
     spatial_index: LongTensor
     category_index: Optional[Union[LongTensor, FloatTensor]]
 
-    _cast_features: classmethod = validator("features", allow_reuse=True, pre=True)(
-        cast_2_float_tensor
-    )
     _cast_type_index: classmethod = validator("type_index", allow_reuse=True, pre=True)(
         cast_2_long_tensor
     )
@@ -79,6 +76,20 @@ class TargetNode(BaseModel):
     _cast_spatial_index: classmethod = validator(
         "spatial_index", allow_reuse=True, pre=True
     )(cast_2_long_tensor)
+
+    @validator('features', pre=True)
+    def create_features(cls, v: Union[dict, LongTensor, FloatTensor], values: dict):
+        if isinstance(v, LongTensor):
+            entry = v
+        elif isinstance(v, FloatTensor):
+            entry = v
+        else:
+            if isinstance(v[0], int):
+                entry = torch.tensor(v, dtype=torch.long)
+            else:
+                entry = torch.tensor(v, dtype=torch.float)
+                entry = torch.nan_to_num(entry)
+        return entry
 
     @validator("category_index", pre=True)
     def create_category_index(
@@ -101,7 +112,8 @@ class TargetNode(BaseModel):
 
     def unsqueeze(self, dim: int = 0):
         self.features = self.features.unsqueeze(dim)
-        self.type_index = self.type_index.unsqueeze(dim)
+        if self.type_index is not None:
+            self.type_index = self.type_index.unsqueeze(dim)
         self.time = self.time.unsqueeze(dim)
         self.spatial_index = self.spatial_index.unsqueeze(dim)
 
@@ -221,7 +233,6 @@ def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
         "time": [],
         "target": {
             "features": [],
-            "type_index": [],
             "time": [],
             "spatial_index": [],
         },
@@ -236,6 +247,8 @@ def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
         batch_graph["category_index"] = []
     if graph_samples[0].target.category_index is not None:
         batch_graph["target"]["category_index"] = []
+    if graph_samples[0].target.type_index is not None:
+        batch_graph["target"]["type_index"] = []
     for sample in graph_samples:
         for key in batch_graph.keys():
             if key != "target":

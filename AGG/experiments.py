@@ -31,6 +31,9 @@ from torch.optim import Adam
 from torchmetrics import MeanAbsoluteError
 from torchmetrics import MeanSquaredError
 from torchmetrics import R2Score
+from torchmetrics import F1Score
+from torchmetrics import Accuracy
+from torchmetrics import AUROC
 from torchvision import transforms
 
 from AGG.extended_typing import ContinuousTimeGraphSample
@@ -280,19 +283,6 @@ class AGGExperiment_Activity(pl.LightningModule):
             on_epoch=True,
             batch_size=self.batch_size,
         )
-        # for i in range(len(attention_list) - 1):
-        #     average_attention = torch.mean(attention_list[i], dim=0).to("cpu")
-        #     self.logger.experiment.add_image(
-        #         f"mean_attention_layer_{i}_val",
-        #         to_pil_image(average_attention),
-        #         global_step=self.global_step,
-        #         close=True,
-        #     )
-        # average_final_attention = torch.mean(attention_list[-1], dim=0).to("cpu")
-        # self.logger.experiment.add_image(
-        #     "mean_final_attention_val",
-        #     to_pil_image(average_final_attention), global_step=self.global_step, close=True
-        # )
         return loss.detach().to("cpu"), y_hat.detach().to("cpu")
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
@@ -310,7 +300,7 @@ class AGGExperiment_Activity(pl.LightningModule):
         # fmt: on
 
 
-class AGGExperiment_ICU(pl.LightningModule):
+class AGGExperimentICUInterpolation(pl.LightningModule):
     def __init__(
         self,
         model_params: dict,
@@ -396,33 +386,160 @@ class AGGExperiment_ICU(pl.LightningModule):
         )
         return loss.detach().to("cpu"), y_hat.detach().to("cpu"), graph_sample
 
-    # def on_validation_end(self) -> None:
-    #     y = torch.cat(self.validation_step_outputs['y'], dim=0)
-    #     y_est = torch.cat(self.validation_step_outputs['y_est'], dim=0)
-    #     type = torch.cat(self.validation_step_outputs['types'], dim=0)
-    #     self.validation_step_outputs['y'].clear()
-    #     self.validation_step_outputs['y_est'].clear()
-    #     self.validation_step_outputs['types'].clear()
-    #     type_index = self.trainer.val_dataloaders.dataset.type_index[:-1]
-    #     square_error = []
-    #     for i, name in enumerate(type_index):
-    #         index = type == i
-    #         y_type = y[index]
-    #         y_est_type = y_est[index]
-    #         mean = torch.mean(y_type)
-    #         std = torch.std(y_type)
-    #         if std.item() == 0 or torch.isnan(std):
-    #             continue
-    #         y_scaled = (y_type - mean) / std
-    #         y_est_scaled = (y_est_type - mean) / std
-    #         errors = y_scaled - y_est_scaled
-    #         se = torch.pow(errors, 2.0)
-    #         square_error.append(se)
-    #         rmse = torch.sqrt(torch.mean(se))
-    #         self.generate_plots(rmse, errors, y_scaled, name)
-    #     rmse_total = torch.sqrt(torch.mean(torch.cat(square_error, dim=0)))
-    #     print(f"RMSE_TOTAL: {rmse_total}")
-    #     self.logger.experiment.add_scalar("val_normalised_RMSE", rmse_total.item())
+    @staticmethod
+    def fig2img(fig):
+        """Convert a Matplotlib figure to a PIL Image and return it"""
+        T = transforms.ToTensor()
+        buf = io.BytesIO()
+        fig.savefig(buf)
+        buf.seek(0)
+        img = Image.open(buf)
+        return T(img), img
+
+    def generate_plots(self, rmse, errors, y_scaled, type):
+        plt.figure(figsize=(20, 10))
+        plt.subplot(1, 2, 1)
+        plt.hist(errors, bins=200, label=f"Errors{type}\n RMSE: {rmse}")
+        plt.legend()
+        plt.subplot(1, 2, 2)
+        plt.hist(y_scaled, bins=200, label=f"{type} data distribution")
+        plt.legend()
+        plt.savefig(
+            Path("./lightning_logs") / self.logger.version / f"{type}.png",
+            bbox_inches="tight",
+        )
+        plt.close()
+
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimiser = Adam(self.agg.parameters(), lr=self.optimiser_params["lr"])
+        lr_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer=optimiser,
+            start_factor=1.0,
+            end_factor=(
+                self.optimiser_params["min_lr"] / self.optimiser_params["max_lr"]
+            ),
+            total_iters=self.optimiser_params["total_iters"],
+        )
+        # fmt: off
+        return [optimiser, ], [lr_scheduler, ]
+        # fmt: on
+
+
+class AGGExperimentICUClassification(pl.LightningModule):
+    def __init__(
+        self,
+        model_params: dict,
+        optimiser_params: dict,
+        data_params: dict,
+        logging_params: dict,
+    ):
+        super().__init__()
+
+        self.model_params = deepcopy(model_params)
+        self.model_params.pop("type")
+        self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
+        if data_params['pretrained_path'] is not None:
+            checkpoint = torch.load(data_params['pretrained_path'])
+            self.agg.load_state_dict(checkpoint["state_dict"], strict=False)
+        if data_params['freeze_pretrained']:
+            for name, param in self.agg.named_parameters():
+                if name.startswith('head'):
+                    continue
+                if name.startswith('cross_attention'):
+                    continue
+                param.requires_grad = False
+        self.logging_params = logging_params
+        self.optimiser_params = optimiser_params
+        self.data_params = data_params
+        self.batch_size = (
+            self.data_params["batch_size"] if "batch_size" in data_params else None
+        )
+        self.train_AUROC = AUROC(task="binary")
+        self.val_AUROC = AUROC(task="binary")
+        self.train_Accuracy = Accuracy(task="binary")
+        self.val_Accuracy = Accuracy(task="binary")
+        self.train_F1 = F1Score(task='binary')
+        self.val_F1 = F1Score(task='binary')
+        self.calc_loss = nn.BCEWithLogitsLoss()
+
+    def forward(
+        self, graph: ContinuousTimeGraphSample
+    ) -> Tuple[torch.Tensor, torch.Tensor, list]:
+        y_hat, attention_list = self.agg(graph, device=self.device)
+        if len(y_hat.shape) == 1:
+            y_hat = y_hat.unsqueeze(0)
+
+        loss = self.calc_loss(y_hat, graph.target.features.float().to(self.device))
+        return loss, y_hat, attention_list
+
+    def training_step(
+        self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
+    ) -> torch.Tensor:
+        loss, y_hat, _ = self.forward(graph_sample)
+        self.log("train_BCE_loss", loss.item(), prog_bar=True)
+        target = graph_sample.target.features.to(self.device)
+        self.train_AUROC(y_hat, target)
+        self.log(
+            "train_AUROC",
+            self.train_AUROC,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        self.train_F1(y_hat, target)
+        self.log(
+            "train_F1",
+            self.train_F1,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        self.train_Accuracy(y_hat, target)
+        self.log(
+            "train_Accuracy",
+            self.train_Accuracy,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        scheduler = self.lr_schedulers()
+        self.log("lr", scheduler.get_last_lr()[0])
+        return loss
+
+    def validation_step(
+        self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, ContinuousTimeGraphSample]:
+        loss, y_hat, attention_list = self.forward(graph_sample)
+        if loss.isnan().item():
+            pass
+        self.log("val_BCE_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
+        target = graph_sample.target.features.to(self.device)
+        y_hat_prob = torch.sigmoid(y_hat)
+        self.val_AUROC(y_hat_prob, target)
+        self.log(
+            "val_AUROC",
+            self.val_AUROC,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        self.val_F1(y_hat_prob, target)
+        self.log(
+            "val_F1",
+            self.val_F1,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        self.val_Accuracy(y_hat_prob, target)
+        self.log(
+            "val_Accuracy",
+            self.val_Accuracy,
+            on_step=True,
+            on_epoch=True,
+            batch_size=self.batch_size,
+        )
+        return loss.detach().to("cpu"), y_hat.detach().to("cpu"), graph_sample
 
     @staticmethod
     def fig2img(fig):
@@ -463,7 +580,7 @@ class AGGExperiment_ICU(pl.LightningModule):
         # fmt: on
 
 
-class AGGExperiment_KDD_Interpolation(pl.LightningModule):
+class AGGExperimentKDDInterpolation(pl.LightningModule):
     def __init__(
         self,
         model_params: dict,

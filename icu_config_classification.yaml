@@ -1,0 +1,35 @@
+data_params:
+  db_config: "Datasets/PhysioNet_2012/data/mongo_config.yaml"
+  batch_size: 30
+  num_workers: 7
+  subset: 0.2
+  classification: true
+  pretrained_path: 'lightning_logs/AGG-icu-13-08_22:34:10/checkpoints/model-epoch=18-val_RMSE_epoch=0.494384.ckpt'
+  freeze_pretrained: false
+  sparsity: 0.10
+  k_fold: 5
+  k_fold_index: 4
+model_params:
+  type: "Transformer"
+  input_dim: 1
+  feature_dim: 16
+  num_heads: 8
+  time_embedding_dim: 16
+  type_embedding_dim: 16
+  spatial_embedding_dim: 16
+  categorical_embedding_dim: 16
+  categorical_input: 3
+  num_layers: 2
+  attention_drop: 0.5
+  dropout: 0.7
+  query_includes_categorical: true
+  query_includes_type: false
+  transfer_learning: true
+optimiser_params:
+  lr: 0.0001
+  max_lr: 0.0002
+  min_lr: 0.00001
+  total_iters: 200
+  max_epochs: 15
+logging_params:
+  name: "AGG_classification"

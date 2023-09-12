@@ -735,14 +735,330 @@ def decompose_physionet_data_interpolation(
     return train_block, test_block
 
 
+def construct_outcome_physionet(config: dict, exists_ok: bool = True):
+    mongo_db_client = MongoClient(host=config["host"], port=config["port"])
+    db = mongo_db_client[config["base"]]
+    scale_db = db["normalised_data"]
+    if scale_db.estimated_document_count() == 0:
+        normalise_physionet(config)
+    assert scale_db.estimated_document_count() > 0
+    outcome_db = db["outcomes"]
+    outcome_alive = outcome_db['alive']
+    outcome_dead = outcome_db['dead']
+    if outcome_db['alive'].estimated_document_count() > 0:
+        if exists_ok:
+            return
+        else:
+            outcome_db.drop()
+            outcome_db['alive'].drop()
+            outcome_db['dead'].drop()
+    root_path = Path(config["data_root"])
+    set_a = root_path / "Outcomes" / "Outcomes-a.txt"
+    set_b = root_path / "Outcomes" / "Outcomes-b.txt"
+    set_c = root_path / "Outcomes" / "Outcomes-c.txt"
+    raw_datasets = [set_a, set_b, set_c]
+    for dir_loc in raw_datasets:
+        with open(dir_loc, "r") as f:
+            data_str_list: list[str] = f.readlines()
+        for i in range(1, len(data_str_list)):
+            record_id_str, SAPS_I, SOFA, Length_of_stay, Survival, In_hospital_death = data_str_list[i][:-1].split(",")
+            record_id = int(record_id_str)
+            SAPS_I = int(SAPS_I)
+            SOFA = int(SOFA)
+            Length_of_stay = int(Length_of_stay)
+            Survival = int(Survival)
+            In_hospital_death = int(In_hospital_death)
+            outcome_db = {
+                "idx": record_id,
+                "SAPS_I": SAPS_I,
+                "SOFA": SOFA,
+                "Length_of_stay": Length_of_stay,
+                "Survival": Survival,
+                "In_hospital_death": In_hospital_death,
+            }
+            if In_hospital_death == 0:
+                outcome_alive.insert_one(outcome_db)
+            else:
+                outcome_dead.insert_one(outcome_db)
+
+
+def create_graph(data: dict, outcome: dict,  longest_node: int, mask_ratio: float = 0.0):
+    node_features = np.array(data["node_features"])
+    if mask_ratio > 0.0:
+        index = np.arange(node_features.shape[0])
+        np.random.shuffle(index)
+        mask = index[int(np.floor(node_features.shape[0] * mask_ratio)):]
+        mask.sort()
+    else:
+        mask = np.arange(node_features.shape[0])
+    padding_size = longest_node - mask.shape[0]
+    graph = copy.deepcopy(graph_template)
+    graph["node_features"] = node_features[mask]
+    graph["node_features"] = np.pad(
+        graph["node_features"], (0, padding_size), "constant"
+    )
+    graph["node_features"] = graph["node_features"].tolist()
+    graph["key_padding_mask"] = (
+            np.pad(np.ones(mask.shape[0]), (0, padding_size), "constant") != 1).tolist()
+    time = np.array(data["time"])
+    relative_time = time.min()
+    time = time[mask]
+    graph["time"] = np.pad(
+        (time - relative_time), (0, padding_size), "constant", constant_values=0
+    ).tolist()
+    graph["type_index"] = np.pad(
+        np.array(data["type_index"])[mask],
+        (0, padding_size),
+        "constant",
+        constant_values=(len(types) - 1),
+    ).tolist()
+    graph["spatial_index"] = np.pad(
+        np.array(data["spatial_index"])[mask], (0, padding_size)
+    ).tolist()
+    graph["category_index"] = np.pad(
+        np.array(data["category_index"])[mask, :],
+        ((0, padding_size), (0, 0)), ).tolist()
+    assert (
+            len(graph["category_index"]) == longest_node
+            and len(graph["category_index"][0]) == 3
+    ), f"{graph['category_index'].shape=}"
+    target = copy.deepcopy(target_template)
+    target.pop("type_index")
+
+    target["features"] = [
+        outcome["In_hospital_death"],
+    ]
+    target["spatial_index"] = [
+        data["spatial_index"][0],
+    ]
+    target["category_index"] = [
+        data["category_index"][0],
+    ]
+    target["time"] = [
+        0
+    ]
+    graph["target"] = target
+    return graph
+
+
+def decompose_physionet_data_k_fold(
+    config: dict,
+    k: int,
+    exists_ok: bool = False,
+    longest_node: int = 1497,
+    masked_ratio: float = 0.1,
+    class_bias_correction: int = 3,
+    resample_rate: int = 10,
+):
+    mongo_db_client = MongoClient(host=config["host"], port=config["port"])
+    db = mongo_db_client[config["base"]]
+    scale_db = db["normalised_data"]
+    if scale_db.estimated_document_count() == 0:
+        normalise_physionet(config)
+    assert scale_db.estimated_document_count() > 0
+    outcome_db = db["outcomes"]
+    if outcome_db['alive'].estimated_document_count() == 0 or not exists_ok:
+        construct_outcome_physionet(config, exists_ok)
+    # create block db
+    if masked_ratio > 0.0:
+        block_name = f"classification_{k}-fold-masked_{masked_ratio * 100:2g}%"
+    else:
+        block_name = f"classification_{k}-fold-masked-balanced"
+    block_db = db[block_name]
+    test_block = block_db["test"]
+    train_block = block_db["train"]
+    if (
+            test_block.estimated_document_count() > 0
+            and train_block.estimated_document_count() > 0
+    ):
+        if exists_ok:
+            return
+        else:
+            train_block.drop()
+            test_block.drop()
+            block_db.drop()
+    # create meta data
+    meta = {
+        "type_index": types,
+        "scaling": params,
+        "spatial_index": unique_ICUType,
+        "spatial": spatial,
+        "category": category,
+        "time": max_time,
+        "normalisation": normalisation,
+        "longest_node": longest_node,
+        'k-fold': k,
+    }
+    dead_count = outcome_db['dead'].estimated_document_count()
+    alive_count = outcome_db['alive'].estimated_document_count()
+    test_count_alive = int(np.floor(alive_count//k))
+    test_count_dead = int(np.floor(dead_count//k))
+    dead_idx = np.arange(dead_count)
+    np.random.shuffle(dead_idx)
+    alive_idx = np.arange(alive_count)
+    np.random.shuffle(alive_idx)
+    k_indexes = []
+    for i in range(k):
+        if i == k-1:
+            test_dead_idx = dead_idx[i*test_count_dead:]
+            test_alive_idx = alive_idx[i*test_count_alive:]
+            k_indexes.append((test_dead_idx, test_alive_idx))
+        else:
+            test_dead_idx = dead_idx[i * test_count_dead:(i + 1) * test_count_dead]
+            test_alive_idx = alive_idx[i * test_count_alive:(i + 1) * test_count_alive]
+            k_indexes.append((test_dead_idx, test_alive_idx))
+    block_db.insert_one(meta)
+    for k_fold in range(k):
+        k_db_test = test_block[k_fold]
+        k_db_train = train_block[k_fold]
+        train_index_count = 0
+        test_index_count = 0
+        test_dead_idx, test_alive_idx = k_indexes[k_fold]
+
+        alive_cursor = outcome_db['alive'].find({})
+        for n, outcome in tqdm(enumerate(alive_cursor)):
+            data = scale_db.find_one({"idx": {"$eq": outcome["idx"]}})
+            if data is None:
+                continue
+            if n in test_alive_idx:
+                graph = create_graph(data, outcome, longest_node)
+                graph["idx"] = test_index_count
+                test_index_count += 1
+                k_db_test.insert_one(graph)
+            else:
+                for i in range(resample_rate):
+                    graph = create_graph(data, outcome, longest_node, masked_ratio)
+                    graph_copy = copy.deepcopy(graph)
+                    graph_copy["idx"] = train_index_count
+                    train_index_count += 1
+                    k_db_train.insert_one(graph_copy)
+        dead_cursor = outcome_db['dead'].find({})
+        for m, outcome in tqdm(enumerate(dead_cursor)):
+            data = scale_db.find_one({"idx": {"$eq": outcome["idx"]}})
+            if data is None:
+                continue
+            if m in test_dead_idx:
+                graph = create_graph(data, outcome, longest_node)
+                graph["idx"] = test_index_count
+                test_index_count += 1
+                k_db_test.insert_one(graph)
+            else:
+                for i in range(resample_rate * class_bias_correction):
+                    graph = create_graph(data, outcome, longest_node, masked_ratio)
+                    graph_copy = copy.deepcopy(graph)
+                    graph_copy["idx"] = train_index_count
+                    train_index_count += 1
+                    k_db_train.insert_one(graph_copy)
+
+
+def decompose_physionet_data_classification(
+    config: dict,
+    exists_ok: bool = False,
+    longest_node: int = 1497,
+    test_fraction: float = 0.2,
+    masked_ratio: float = 0.1,
+    class_bias_correction: int = 3,
+    resample_rate: int = 10,
+):
+    # access mongo db and get data
+    mongo_db_client = MongoClient(host=config["host"], port=config["port"])
+    db = mongo_db_client[config["base"]]
+    scale_db = db["normalised_data"]
+    if scale_db.estimated_document_count() == 0:
+        normalise_physionet(config)
+    assert scale_db.estimated_document_count() > 0
+    outcome_db = db["outcomes"]
+    if outcome_db['alive'].estimated_document_count() == 0 or not exists_ok:
+        construct_outcome_physionet(config, exists_ok)
+    # create block db
+    if masked_ratio > 0.0:
+        block_name = f"classification_{test_fraction*100:2g}%-masked_{masked_ratio*100:2g}%"
+    else:
+        block_name = f"classification_{test_fraction*100:2g}%-balanced"
+    block_db = db[block_name]
+    test_block = block_db["test"]
+    train_block = block_db["train"]
+    if (
+        test_block.estimated_document_count() > 0
+        and train_block.estimated_document_count() > 0
+    ):
+        if exists_ok:
+            return
+        else:
+            train_block.drop()
+            test_block.drop()
+            block_db.drop()
+    # create meta data
+    meta = {
+        "type_index": types,
+        "scaling": params,
+        "spatial_index": unique_ICUType,
+        "spatial": spatial,
+        "category": category,
+        "time": max_time,
+        "normalisation": normalisation,
+        "longest_node": longest_node,
+        'test_fraction': test_fraction,
+    }
+    dead_count = outcome_db['dead'].estimated_document_count()
+    alive_count = outcome_db['alive'].estimated_document_count()
+    test_count_alive = int(np.floor(alive_count * test_fraction))
+    test_count_dead = int(np.floor(dead_count * test_fraction))
+    dead_idx = np.arange(dead_count)
+    np.random.shuffle(dead_idx)
+    alive_idx = np.arange(alive_count)
+    np.random.shuffle(alive_idx)
+    test_dead_idx = dead_idx[:test_count_dead]
+    test_alive_idx = alive_idx[:test_count_alive]
+
+    block_db.insert_one(meta)
+    train_index_count = 0
+    test_index_count = 0
+    alive_cursor = outcome_db['alive'].find({})
+    for n, outcome in tqdm(enumerate(alive_cursor)):
+        data = scale_db.find_one({"idx": {"$eq": outcome["idx"]}})
+        if data is None:
+            continue
+        if n in test_alive_idx:
+            graph = create_graph(data, outcome, longest_node)
+            graph["idx"] = test_index_count
+            test_index_count += 1
+            test_block.insert_one(graph)
+        else:
+            for i in range(resample_rate):
+                graph = create_graph(data, outcome, longest_node, masked_ratio)
+                graph_copy = copy.deepcopy(graph)
+                graph_copy["idx"] = train_index_count
+                train_index_count += 1
+                train_block.insert_one(graph_copy)
+
+    dead_cursor = outcome_db['dead'].find({})
+    for m, outcome in tqdm(enumerate(dead_cursor)):
+        data = scale_db.find_one({"idx": {"$eq": outcome["idx"]}})
+        if data is None:
+            continue
+        if m in test_dead_idx:
+            graph = create_graph(data, outcome, longest_node)
+            graph["idx"] = test_index_count
+            test_index_count += 1
+            test_block.insert_one(graph)
+        else:
+            for i in range(resample_rate * class_bias_correction):
+                graph = create_graph(data, outcome, longest_node, masked_ratio)
+                graph_copy = copy.deepcopy(graph)
+                graph_copy["idx"] = train_index_count
+                train_index_count += 1
+                train_block.insert_one(graph_copy)
+
+
 class ICUData(GraphDataset):
     valid_versions = ["train", "test"]
 
     def __init__(
         self,
-        block_size: int,
-        sparsity: float,
         db_config: Path,
+        block_size: int = 100,
+        sparsity: float = 0.0,
         version: str = "train",
         create_preprocessing: bool = True,
         shuffle: bool = False,
@@ -750,6 +1066,10 @@ class ICUData(GraphDataset):
         skip_leq_block: bool = False,
         normal: bool = True,
         force_preprocessing: bool = False,
+        classification: bool = False,
+        k_fold: int = 5,
+        test_fraction: float = 0.2,
+        k_fold_index: Optional[int] = None,
     ):
         assert (
             version in self.valid_versions
@@ -760,24 +1080,52 @@ class ICUData(GraphDataset):
             host=self.mongo_config["host"], port=self.mongo_config["port"]
         )
         db = mongo_db_client[self.mongo_config["base"]]
-        if skip_leq_block:
-            block_name = f"block_{block_size:02d}_{100 * sparsity}%_skip"
+        if classification:
+            if k_fold is not None:
+                if sparsity > 0.0:
+                    block_name = f"classification_{k_fold}-fold-masked_{sparsity * 100:2g}%"
+                else:
+                    block_name = f"classification_{k_fold}-fold-masked-balanced"
+            else:
+                if sparsity > 0.0:
+                    block_name = f"classification_{test_fraction * 100:2g}%-masked_{sparsity * 100:2g}%"
+                else:
+                    block_name = f"classification_{test_fraction*100:2g}%-balanced"
         else:
-            block_name = f"block_{block_size:02d}_{100 * sparsity}%"
+            if skip_leq_block:
+                block_name = f"block_{block_size:02d}_{100 * sparsity}%_skip"
+            else:
+                block_name = f"block_{block_size:02d}_{100 * sparsity}%"
         if block_name not in db.list_collection_names() or force_preprocessing:
             if create_preprocessing:
                 print(
                     f"No pre-processing for {block_name=}, this could take a while..."
                 )
-                decompose_physionet_data_interpolation(
-                    self.mongo_config,
-                    block_size=block_size,
-                    sparsity=sparsity,
-                    exists_ok=False,
-                    normal=normal,
-                    skip_leq_block=skip_leq_block,
-                    block_steps=5,
-                )
+                if classification:
+                    if k_fold is not None:
+                        decompose_physionet_data_k_fold(
+                            self.mongo_config,
+                            k=k_fold,
+                            exists_ok=False,
+                            masked_ratio=sparsity,
+                        )
+                    else:
+                        decompose_physionet_data_classification(
+                            self.mongo_config,
+                            exists_ok=False,
+                            test_fraction=test_fraction,
+                            masked_ratio=sparsity,
+                        )
+                else:
+                    decompose_physionet_data_interpolation(
+                        self.mongo_config,
+                        block_size=block_size,
+                        sparsity=sparsity,
+                        exists_ok=False,
+                        normal=normal,
+                        skip_leq_block=skip_leq_block,
+                        block_steps=5,
+                    )
             else:
                 raise Exception(f"No preprocessing data available for {block_name=}")
         else:
@@ -793,6 +1141,12 @@ class ICUData(GraphDataset):
         if self.type_index[-1] != "<PAD>":
             self.type_index.append("<PAD>")
         db_split = db_handle[self.split]
+        if k_fold is not None:
+            assert k_fold_index is not None
+            db_split = db_split[k_fold_index]
+            self.k = k_fold_index
+        else:
+            self.k = None
         print(f"Creating index for {db_split}...")
         db_split.create_index("idx")
         print("Done!")
@@ -815,12 +1169,20 @@ class ICUData(GraphDataset):
                 )
 
     def lazy_load_db(self):
-        mongo_db_client = MongoClient(
-            host=self.mongo_config["host"], port=self.mongo_config["port"]
-        )
-        self.db_handle = mongo_db_client[self.mongo_config["base"]][
-            self.preprocessing_reference
-        ][self.split]
+        if self.k is not None:
+            mongo_db_client = MongoClient(
+                host=self.mongo_config["host"], port=self.mongo_config["port"]
+            )
+            self.db_handle = mongo_db_client[self.mongo_config["base"]][
+                self.preprocessing_reference
+            ][self.split][self.k]
+        else:
+            mongo_db_client = MongoClient(
+                host=self.mongo_config["host"], port=self.mongo_config["port"]
+            )
+            self.db_handle = mongo_db_client[self.mongo_config["base"]][
+                self.preprocessing_reference
+            ][self.split]
         self.lazy_loaded = True
 
     def __len__(self):
@@ -841,20 +1203,15 @@ class ICUData(GraphDataset):
 
 if __name__ == "__main__":
     test_obj = ICUData(
-        block_size=100,
-        sparsity=0.7,
         db_config=Path("./data/mongo_config.yaml"),
         version="train",
+        classification=True,
         force_preprocessing=False,
-        skip_leq_block=False,
+        sparsity=0.1,
+        k_fold=5,
+        k_fold_index=0
     )
     print(len(test_obj))  # 11701077
     assert isinstance(len(test_obj), int)
-    # decompose_physionet_data_interpolation(
-    #     config,
-    #     block_size=100,
-    #     skip_leq_block=False,
-    #     sparsity=0.5,
-    #     normal=True,
-    #     exists_ok=False
-    # )
+    print(test_obj[0])
+

@@ -1,3 +1,20 @@
+"""
+    Copyright (C) 2023, Christopher Paul Ley
+    Asynchronous Graph Generator
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 from pathlib import Path
 from typing import Dict
 
@@ -44,7 +61,7 @@ db_params = db["param"]
 params = db_params.find_one({})
 time_scale = 3600 * 72
 # Get the date range
-date_range = (training_masks[0][0], test_masks[0][1])
+date_range = (training_masks[0][0], test_masks[2][1])
 
 # Get the data from the database
 sparsity = 0.3
@@ -89,6 +106,29 @@ def create_batch(data_set: list) -> ContinuousTimeGraphSample:
         graph = GraphDataset.graph_transform(data)
         batch.append(graph)
     return collate_graph_samples(batch)
+
+
+def interpolate_mean(
+        time_array: np.ndarray,
+        value_array: np.ndarray,
+        est_time_array: np.ndarray,
+        kernel_width: int
+) -> np.ndarray:
+    interpolated_value_array = np.zeros_like(est_time_array)
+    for n, est_time in enumerate(est_time_array):
+        index = np.argmin(np.abs(time_array - est_time))
+
+        if index - kernel_width // 2 < 0:
+            start = 0
+            end = kernel_width
+        elif index + kernel_width // 2 > len(time_array):
+            start = len(time_array) - kernel_width
+            end = len(time_array)
+        else:
+            start = index - kernel_width // 2
+            end = index + kernel_width // 2
+        interpolated_value_array[n] = np.mean(value_array[start:end])
+    return interpolated_value_array
 
 
 time_series: Dict[str, dict] = {
@@ -164,6 +204,28 @@ for station in unique_stations:
     time_series[station]["est_time"] = np.concatenate(
         time_series[station]["est_time"], axis=0
     )
+    interpolation_mean_3 = interpolate_mean(
+        time_series[station]["time"],
+        time_series[station]["input"],
+        time_series[station]["est_time"],
+        3)
+    interpolation_mean_5 = interpolate_mean(
+        time_series[station]["time"],
+        time_series[station]["input"],
+        time_series[station]["est_time"],
+        5)
+    interpolation_mean_7 = interpolate_mean(
+        time_series[station]["time"],
+        time_series[station]["input"],
+        time_series[station]["est_time"],
+        7)
+    interpolation_mean_9 = interpolate_mean(
+        time_series[station]["time"],
+        time_series[station]["input"],
+        time_series[station]["est_time"],
+        9)
+
+
     plt.figure(figsize=(20, 10), dpi=300)
     plt.plot(
         time_series[station]["time"] * 72,
@@ -190,6 +252,11 @@ for station in unique_stations:
     plt.legend()
     plt.xlabel("Time (h)")
     plt.ylabel("PM2.5")
-    plt.title(f"PM2.5 at {station} with sparsity={sparsity*100:2g}%")
+    plt.title(f"PM2.5 at {station} with sparsity={sparsity*100:2g}%"
+              f"\nRMSE: {np.sqrt(np.mean(np.power(time_series[station]['pm25_est'] - time_series[station]['pm25'], 2.0))):3g}"
+              f"\nRMSE mean kernel:3: {np.sqrt(np.mean(np.power(interpolation_mean_3 - time_series[station]['pm25'], 2.0))):3g}"
+              f"\nRMSE mean kernel:5: {np.sqrt(np.mean(np.power(interpolation_mean_5 - time_series[station]['pm25'], 2.0))):3g}"
+              f"\nRMSE mean kernel:7: {np.sqrt(np.mean(np.power(interpolation_mean_7 - time_series[station]['pm25'], 2.0))):3g}"
+              f"\nRMSE mean kernel:9: {np.sqrt(np.mean(np.power(interpolation_mean_9 - time_series[station]['pm25'], 2.0))):3g}")
     plt.savefig(figure_path / f"pm25_{station}_{sparsity*100:2g}%.png")
     plt.close()

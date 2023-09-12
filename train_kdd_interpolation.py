@@ -29,7 +29,7 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 
-from AGG.experiments import AGGExperiment_KDD_Interpolation
+from AGG.experiments import AGGExperimentKDDInterpolation
 from AGG.extended_typing import collate_graph_samples
 from Datasets.Beijing.datareader import KDDInterpolationDataset
 
@@ -126,7 +126,7 @@ def main():
     config["model_params"]["num_spatial_components"] = len(train_reader.spatial_index)
     config["model_params"]["num_categories"] = len(train_reader.category_index)
 
-    model = AGGExperiment_KDD_Interpolation(
+    model = AGGExperimentKDDInterpolation(
         model_params=config["model_params"],
         optimiser_params=config["optimiser_params"],
         data_params=config["data_params"],
