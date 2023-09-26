@@ -4,11 +4,11 @@ data_params:
   num_workers: 7
   subset: 0.2
   classification: true
-  pretrained_path: 'lightning_logs/AGG-icu-13-08_22:34:10/checkpoints/model-epoch=18-val_RMSE_epoch=0.494384.ckpt'
+  pretrained_path: "lightning_logs/AGG-icu-14-08_23:09:01/checkpoints/model-epoch=106-val_RMSE_epoch=0.535200.ckpt"
   freeze_pretrained: false
   sparsity: 0.10
   k_fold: 5
-  k_fold_index: 4
+  k_fold_index: 2
 model_params:
   type: "Transformer"
   input_dim: 1
@@ -30,6 +30,6 @@ optimiser_params:
   max_lr: 0.0002
   min_lr: 0.00001
   total_iters: 200
-  max_epochs: 15
+  max_epochs: 30
 logging_params:
   name: "AGG_classification"

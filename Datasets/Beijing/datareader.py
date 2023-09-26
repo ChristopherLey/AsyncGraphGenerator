@@ -261,7 +261,7 @@ def random_index(data_len: int, sparsity: float):
 
 
 def create_indexes(
-    config: dict, sparsity: float, block_name: str, replace: bool = False
+    config: dict, sparsity: float,
 ):
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
@@ -299,7 +299,6 @@ def create_data_block(
     block_size: int,
     n: int,
     time_scale: float,
-    only_pm25: bool,
     params,
     sample_count: int,
 ):
@@ -329,7 +328,7 @@ def create_data_block(
     graph_target = removed_index_array[mask]
     for i in range(graph_target.shape[0]):
         k = graph_target[i]
-        if raw[k]["type_index"] == 0 or not only_pm25:
+        if raw[k]["type_index"] == 0:
             graph_sample = copy.deepcopy(graph)
             target = copy.deepcopy(target_template)
             feature_type = features[raw[k]["type_index"]]
@@ -360,9 +359,8 @@ def create_interpolation_dataset(
     block_size: int,
     exists_ok: bool = True,
     sparsity: float = 0.5,
-    block_steps: int = int(3200 // 1.5),
+    block_steps: int = 25,
     time_scale: int = 3600 * 72,
-    only_pm25: bool = True,
 ):
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
@@ -371,10 +369,7 @@ def create_interpolation_dataset(
     db_raw = db["raw"]
     assert db_raw.estimated_document_count() > 0
     params = db_params.find_one({})
-    if only_pm25:
-        block_name = f"block_{block_size:02d}_{100 * sparsity}%_pm25"
-    else:
-        block_name = f"block_{block_size:02d}_{100 * sparsity}%"
+    block_name = f"block_{block_size:02d}_{100 * sparsity}%_steps_{block_steps}"
     block_db = db[block_name]
     test_block = block_db["test"]
     train_block = block_db["train"]
@@ -392,7 +387,10 @@ def create_interpolation_dataset(
     indexes, raw_train, raw_test = create_indexes(config, sparsity, block_name)
     test_sample_count = 0
     train_sample_count = 0
-    for index, raw in tqdm(zip(indexes["train"], raw_train)):
+
+    for i in trange(len(raw_train)):
+        index = indexes["train"][i]
+        raw = raw_train[i]
         for n in trange(0, len(index["remainder"]) - block_size, block_steps):
             write_data, train_sample_count = create_data_block(
                 index,
@@ -400,13 +398,14 @@ def create_interpolation_dataset(
                 block_size,
                 n,
                 time_scale,
-                only_pm25,
                 params,
                 train_sample_count,
             )
             if len(write_data) > 0:
                 train_block.insert_many(write_data)
-    for index, raw in tqdm(zip(indexes["test"], raw_test)):
+    for i in trange(len(raw_test)):
+        index = indexes["test"][i]
+        raw = raw_test[i]
         for n in trange(0, len(index["remainder"]) - block_size, block_steps):
             write_data, test_sample_count = create_data_block(
                 index,
@@ -414,7 +413,6 @@ def create_interpolation_dataset(
                 block_size,
                 n,
                 time_scale,
-                only_pm25,
                 params,
                 test_sample_count,
             )
@@ -584,7 +582,7 @@ class KDDInterpolationDataset(GraphDataset):
         version: str = "train",
         subset: Optional[int] = None,
         shuffle: bool = False,
-        only_pm25: bool = True,
+        block_steps: int = int(3200 // 1.5),
     ):
         assert (
             version in self.valid_versions
@@ -595,10 +593,7 @@ class KDDInterpolationDataset(GraphDataset):
             host=self.mongo_config["host"], port=self.mongo_config["port"]
         )
         db = mongo_db_client[self.mongo_config["base"]]
-        if only_pm25:
-            block_name = f"block_{block_size:02d}_{100 * sparsity}%_pm25.{version}"
-        else:
-            block_name = f"block_{block_size:02d}_{100 * sparsity}%.{version}"
+        block_name = f"block_{block_size:02d}_{100 * sparsity}%_steps_{block_steps}.{version}"
 
         if block_name not in db.list_collection_names():
             raise Exception(f"No preprocessing data available for {block_name=}")
@@ -766,40 +761,10 @@ class AirQualityDataRegression(Dataset):
         return sample
 
 
-# def test_datareader():
-#     test_obj = KDDInterpolationDataset(
-#             block_size=1500,
-#             sparsity=0.1,
-#             db_config=Path("./data/mongo_config.yaml"),
-#             version='test'
-#         )
-#     print(len(test_obj))  # 749529
-#     assert isinstance(len(test_obj), int)
-#     sample: ContinuousTimeGraphSample = test_obj[1]
-#     assert not sample.node_features.isnan().any()
-#     assert not sample.target.features.isnan()
-
-
 if __name__ == "__main__":
     with open("./data/mongo_config.yaml", "r") as f:
         config: dict = yaml.safe_load(f)
         config["data_root"] = "data/raw"
     create_interpolation_dataset(
-        config, block_size=1500, sparsity=0.1, block_steps=5, exists_ok=False
+        config, block_size=1500, sparsity=0.1, block_steps=1000, exists_ok=False
     )
-    # test_obj = KDDInterpolationDataset(
-    #     block_size=1500,
-    #     sparsity=0.1,
-    #     db_config=Path("./data/mongo_config.yaml"),
-    #     version='test'
-    # )
-    # train_obj = KDDInterpolationDataset(
-    #     block_size=1500,
-    #     sparsity=0.1,
-    #     db_config=Path("./data/mongo_config.yaml"),
-    #     version='train'
-    # )
-    # print(len(test_obj))
-    # print(len(train_obj))
-    # print(test_obj[149932])
-    # print(train_obj[304826])

@@ -81,10 +81,12 @@ def main():
             sparsity=config["data_params"]["sparsity"],
             db_config=Path(config["data_params"]["db_config"]),
             version="train",
+            block_steps=config['data_params']['block_steps'],
         )
         train_length = len(train_reader)
         subset = floor(train_length * config["data_params"]["subset"])
         print(f"Training with a subset of {subset}/{train_length}")
+        print(f'Total train dataset length: {train_length}')
         shuffle = True
     else:
         subset = None
@@ -96,6 +98,7 @@ def main():
         version="train",
         subset=subset,
         shuffle=shuffle,
+        block_steps=config['data_params']['block_steps'],
     )
     train_dataloader = DataLoader(
         train_reader,
@@ -111,6 +114,7 @@ def main():
         sparsity=config["data_params"]["sparsity"],
         db_config=Path(config["data_params"]["db_config"]),
         version="test",
+        block_steps=config['data_params']['block_steps'],
     )
     val_dataloader = DataLoader(
         val_reader,
@@ -149,6 +153,7 @@ def main():
 
     version_path = (
         f"AGG-kdd_{int(config['data_params']['sparsity'] * 100)}%_"
+        f"steps_{config['data_params']['block_steps']}_"
         f"inter-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
     )
 
