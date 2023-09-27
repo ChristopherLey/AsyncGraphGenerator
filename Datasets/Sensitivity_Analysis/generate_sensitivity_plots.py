@@ -2,7 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-sns.set()
+
+sns.set_style('darkgrid')
 
 df = pd.read_csv('./kdd_10%_step_sensitivity.csv')
 df.sort_values(by=['Steps'], inplace=True)
@@ -14,7 +15,7 @@ plt.title('KDD 10% Step Sensitivity')
 plt.tight_layout()
 plt.savefig('./kdd_step_sensitivity.pdf', dpi=300)
 plt.figure(figsize=(6, 3))
-plt.plot(df['Size'], df['RMSE'], '.', label='Lowest RMSE', ms=10)
+plt.plot(df['Size'], df['RMSE'], '.-', label='Lowest RMSE', ms=10)
 plt.xscale('log')
 plt.xlabel('Augmented Training Size')
 plt.ylabel('RMSE')

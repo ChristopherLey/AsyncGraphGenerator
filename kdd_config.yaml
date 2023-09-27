@@ -5,7 +5,7 @@ data_params:
   batch_size: 30
   num_workers: 7
   subset: 0.5
-  block_steps: 1000
+  block_steps: 1500
 model_params:
   type: "Transformer"
   input_dim: 1

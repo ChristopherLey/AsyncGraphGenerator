@@ -384,7 +384,7 @@ def create_interpolation_dataset(
             test_block.drop()
             block_db.drop()
     print(f"Creating interpolation dataset for {block_name}")
-    indexes, raw_train, raw_test = create_indexes(config, sparsity, block_name)
+    indexes, raw_train, raw_test = create_indexes(config, sparsity)
     test_sample_count = 0
     train_sample_count = 0
 
@@ -766,5 +766,5 @@ if __name__ == "__main__":
         config: dict = yaml.safe_load(f)
         config["data_root"] = "data/raw"
     create_interpolation_dataset(
-        config, block_size=1500, sparsity=0.1, block_steps=1000, exists_ok=False
+        config, block_size=1500, sparsity=0.1, block_steps=1500, exists_ok=False
     )
