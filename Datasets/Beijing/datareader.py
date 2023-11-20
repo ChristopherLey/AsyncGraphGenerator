@@ -354,6 +354,73 @@ def create_data_block(
     return write_data, sample_count
 
 
+def create_seq_data_batch(
+    raw: list,
+    block_size: int,
+    n: int,
+    time_scale: float,
+    params,
+    sample_count: int,
+    prediction_steps: int = 24*15,
+):
+    write_data = []
+    input_index = np.arange(n, (n + block_size))
+    prediction_indexes = []
+    max_times = []
+    for i in range(n + block_size, len(raw)):
+        if raw[i]["type_index"] == 0:
+            prediction_indexes.append(i)
+            max_times.append(raw[i]["time"])
+            if len(prediction_indexes) == prediction_steps:
+                break
+    graph = copy.deepcopy(graph_template)
+    index_datetime = []
+    prediction_datetime = []
+    for idx in range(len(input_index)):
+        raw_entry = raw[input_index[idx]]
+        graph["node_features"].append(
+            normalise(
+                raw_entry["node_features"],
+                params["scaling"][features[raw_entry["type_index"]]],
+            )
+        )
+        graph["time"].append(
+            raw_entry["time"]
+        )
+        index_datetime.append(raw_entry["time"])
+        graph["category_index"].append(raw_entry["category_index"])
+        graph["type_index"].append(raw_entry["type_index"])
+        graph["spatial_index"].append(raw_entry["spatial_index"])
+    graph["key_padding_mask"] = (np.zeros_like(input_index) != 0).tolist()
+    for idx, max_time in zip(prediction_indexes, max_times):
+        graph_sample = copy.deepcopy(graph)
+        target = copy.deepcopy(target_template)
+        feature_type = features[raw[idx]["type_index"]]
+        target["features"] = [
+            normalise(raw[idx]["node_features"], params["scaling"][feature_type]),
+        ]
+        target["type_index"] = [
+            raw[idx]["type_index"],
+        ]
+        target["spatial_index"] = [
+            raw[idx]["spatial_index"],
+        ]
+        target["category_index"] = [
+            raw[idx]["category_index"],
+        ]
+        target["time"] = [
+            (max_time - raw[idx]["time"]).total_seconds() / time_scale,
+        ]
+        prediction_datetime.append(raw[idx]["time"])
+        graph_sample["target"] = target
+        graph_sample["idx"] = sample_count
+        for i in range(len(graph_sample["time"])):
+            graph_sample["time"][i] = (max_time - graph_sample["time"][i]).total_seconds() / time_scale
+        sample_count += 1
+        write_data.append(graph_sample)
+    return write_data, sample_count, index_datetime, prediction_datetime
+
+
 def create_interpolation_dataset(
     config: dict,
     block_size: int,

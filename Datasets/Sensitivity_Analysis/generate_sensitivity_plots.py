@@ -2,7 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+import matplotlib
+font = {'family' : 'normal',
+        'size'   : 11}
 
+matplotlib.rc('font', **font)
 sns.set_style('darkgrid')
 
 df = pd.read_csv('./kdd_10%_step_sensitivity.csv')
