@@ -35,6 +35,7 @@ from tqdm import trange
 
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.graph_dataset import GraphDataset
+from Datasets.data_tools import random_index
 
 features = [
     "PM2.5",
@@ -247,17 +248,6 @@ def compute_normalisation(config: dict, exist_ok: bool = True):
 
 def normalise(feature, scaling):
     return (feature - scaling["mean"]) / scaling["std"]
-
-
-def random_index(data_len: int, sparsity: float):
-    idx = np.arange(0, data_len)
-    subset_size = int(np.floor(data_len) * sparsity)
-    np.random.shuffle(idx)
-    removed = idx[:subset_size]
-    remainder = idx[subset_size:]
-    removed.sort()
-    remainder.sort()
-    return removed, remainder
 
 
 def create_indexes(

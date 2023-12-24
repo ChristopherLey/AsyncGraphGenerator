@@ -83,3 +83,4 @@ def fig2img(fig):
     buf.seek(0)
     img = Image.open(buf)
     return T(img)
+

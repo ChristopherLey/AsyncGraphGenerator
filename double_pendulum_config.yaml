@@ -1,0 +1,27 @@
+data_params:
+  block_size: 1000
+  sparsity: 0.8
+  db_config: "Datasets/DoublePendulum/data/mongo_config.yaml"
+  batch_size: 3000
+  num_workers: 7
+  subset: 0.3
+  dynamics_params:
+    g: 9.81
+    l_1: 1.0
+    m_1: 1.5
+    l_2: 1
+    m_2: 1
+    k_1: 0.05
+  generation_params:
+    theta_1_dot_distribution:
+    - 0
+    - 1.4770655749054404
+    theta_2_dot_distribution:
+    - 0.15390047391321904
+    - 2.236036019867856
+    train_length: 100000
+    test_length: 10000
+    signal_std: 0.05
+    sampling_rate: 0.05
+    samples_per_simulation: 100
+    prediction_limit: 4.0
