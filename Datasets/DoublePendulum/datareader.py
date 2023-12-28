@@ -25,15 +25,10 @@ from typing import Optional
 import numpy as np
 import yaml
 from pymongo import MongoClient
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
-from tqdm import trange
 
-from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.graph_dataset import GraphDataset
 from Datasets.DoublePendulum.dynamics import generate_double_pendulum_data
-from Datasets.data_tools import random_index
 
 type_index = [
     "x_1", "y_1", "x_2", "y_2",
@@ -42,8 +37,6 @@ target_template: Dict[str, list] = {
     "features": [],
     "time": [],
     "type_index": [],
-    # "spatial_index": [],
-    # "category_index": [],
 }
 graph_template: dict = {
     "node_features": [],
@@ -51,9 +44,7 @@ graph_template: dict = {
     "time": [],
     "edge_index": [],
     "type_index": [],
-    # "spatial_index": [],
     "attention_mask": [],
-    # "category_index": [],
 }
 scaler = {
     "fields": ["x_1", "y_1", "x_2", "y_2"],
@@ -110,40 +101,17 @@ def generate_simulation_data(idx, block_size, sparsity, dynamics_params, generat
 
     greater_than_input = block_target_time > block_time[0]
     less_than_prediction_limit = block_target_time <= (block_time[-1] + generation_params["prediction_limit"])
-    valid_index = np.logical_and(greater_than_input, less_than_prediction_limit)
-    block_target = block_target[valid_index]
-    block_target_time = block_target_time[valid_index]
+    less_than_interpolation_limit = block_target_time <= (block_time[-1])
 
-    samples = np.arange(
-        np.random.randint(0, block_target_time.shape[0] // generation_params["samples_per_simulation"]),
-        block_target_time.shape[0],
-        block_target_time.shape[0] // generation_params["samples_per_simulation"])
-    target_counter = np.arange(target_data.shape[1]*target_data.shape[0])
-    target_counter = target_counter.reshape(-1, 4)
-    sample_pointer = 0
-    selected_target_data = []
-    selected_target_categories = []
-    selected_target_time = []
-    selected_mask = []
-    target_time = target_time.T
-    for i in range(target_counter.shape[0]):
-        if samples[sample_pointer] in target_counter[i]:
-            selected_target_data.append(target_data[i].tolist())
-            selected_target_categories.append(target_categories[i].tolist())
-            selected_target_time.append(target_time[i].tolist())
-            selected_mask.append((target_counter[i] == samples[sample_pointer]).astype(int).tolist())
-            sample_pointer += 1
-            if sample_pointer >= samples.shape[0]:
-                break
-    raw = {
-        "input_data": input_data.tolist(),
-        "input_categories": input_categories.tolist(),
-        "input_time": input_time.tolist(),
-        "target_data": selected_target_data,
-        "target_categories": selected_target_categories,
-        "target_time": selected_target_time,
-        "samples": samples.tolist(),
-    }
+    samples_per_simulation = generation_params["samples_per_simulation"]//2
+    interpolation_mask = np.logical_and(greater_than_input, less_than_prediction_limit)
+    interpolation_samples = np.argwhere(interpolation_mask).flatten()
+    selected_interpolation_samples = np.random.choice(interpolation_samples, samples_per_simulation, replace=False)
+    prediction_mask = np.logical_and(np.logical_not(less_than_interpolation_limit), less_than_prediction_limit)
+    prediction_samples = np.argwhere(prediction_mask).flatten()
+    selected_prediction_samples = np.random.choice(prediction_samples, samples_per_simulation, replace=False)
+    samples = np.concatenate([selected_interpolation_samples, selected_prediction_samples])
+    samples.sort()
 
     base_graph = copy.deepcopy(graph_template)
     base_graph["node_features"] = block_input.tolist()
@@ -157,10 +125,10 @@ def generate_simulation_data(idx, block_size, sparsity, dynamics_params, generat
         target["type_index"] = block_target_categories[samples[i]].tolist()
         graph_sample = copy.deepcopy(base_graph)
         graph_sample['target'] = target
-        idx += 1
         graph_sample['idx'] = idx
         graph_lists.append(graph_sample)
-    return graph_lists, raw, idx
+        idx += 1
+    return graph_lists, idx
 
 
 def generate_data(
@@ -182,7 +150,6 @@ def generate_data(
     block_db = db[block_name]
     test_block = block_db["test"]
     train_block = block_db["train"]
-    raw_block = block_db["raw"]
     if (
         test_block.estimated_document_count() > 0
         and train_block.estimated_document_count() > 0
@@ -199,24 +166,15 @@ def generate_data(
         "dynamics_params": dynamics_params,
         "generation_params": generation_params,
     }
-    # block_db.insert_one(meta)
+    block_db.insert_one(meta)
     idx = 0
     for _ in tqdm(range(0, generation_params["train_length"]//generation_params["samples_per_simulation"])):
-        graph_lists, raw, idx = generate_simulation_data(idx, block_size, sparsity, dynamics_params, generation_params)
-        # train_block.insert_many(graph_lists)
-        # raw["type"] = "train"
-        # raw_block.insert_one(raw)
+        graph_lists, idx = generate_simulation_data(idx, block_size, sparsity, dynamics_params, generation_params)
+        train_block.insert_many(graph_lists)
     idx = 0
     for _ in tqdm(range(0, generation_params["test_length"]//generation_params["samples_per_simulation"])):
-        graph_lists, raw, idx = generate_simulation_data(idx, block_size, sparsity, dynamics_params, generation_params)
-        # test_block.insert_many(graph_lists)
-        # raw["type"] = "test"
-        # raw_block.insert_one(raw)
-
-
-
-
-
+        graph_lists, idx = generate_simulation_data(idx, block_size, sparsity, dynamics_params, generation_params)
+        test_block.insert_many(graph_lists)
 
 
 class DoublePendulumDataset(GraphDataset):
@@ -268,14 +226,14 @@ class DoublePendulumDataset(GraphDataset):
             self.preprocessing_reference
         ]
         self.meta_data = db_handle.find_one({})
-        self.category_index = self.meta_data.pop("category_index")
-        self.spatial_index = self.meta_data.pop("spatial_index")
-        self.type_index = self.meta_data.pop("type_index")
         db_split = db_handle[self.split]
         print(f"Creating index for {db_split}...")
         db_split.create_index("idx")
         print("Done!")
         self.length = db_split.estimated_document_count()
+        self.type_index = type_index
+        self.spatial_index = []
+        self.category_index = []
         self.lazy_loaded = False
         self.db_handle = None
         self.shuffle = shuffle
@@ -312,8 +270,10 @@ class DoublePendulumDataset(GraphDataset):
             self.lazy_load_db()
         if self.shuffle:
             item = randint(0, self.length - 1)
-        sample = self.graph_transform(self.db_handle.find_one({"idx": item}))
-        return sample
+        sample = self.db_handle.find_one({"idx": item})
+        sample['key_padding_mask'] = [False]*len(sample['node_features'])
+        graph = self.graph_transform(sample)
+        return graph
 
 
 if __name__ == "__main__":
@@ -326,8 +286,10 @@ if __name__ == "__main__":
         db_config=Path("./data/mongo_config.yaml"),
         dynamics_params=config['data_params']["dynamics_params"],
         generation_params=config['data_params']["generation_params"],
-        version="train",
+        version="test",
         create_preprocessing=True,
         shuffle=False,
         subset=None,
     )
+    print(len(datareader))
+    print(datareader[0])

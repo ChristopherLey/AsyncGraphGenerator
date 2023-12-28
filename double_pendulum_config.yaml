@@ -2,9 +2,9 @@ data_params:
   block_size: 1000
   sparsity: 0.8
   db_config: "Datasets/DoublePendulum/data/mongo_config.yaml"
-  batch_size: 3000
+  batch_size: 70
   num_workers: 7
-  subset: 0.3
+  subset: 0.1
   dynamics_params:
     g: 9.81
     l_1: 1.0
@@ -19,9 +19,30 @@ data_params:
     theta_2_dot_distribution:
     - 0.15390047391321904
     - 2.236036019867856
-    train_length: 100000
-    test_length: 10000
+    train_length: 1000000
+    test_length: 100000
     signal_std: 0.05
     sampling_rate: 0.05
     samples_per_simulation: 100
     prediction_limit: 4.0
+model_params:
+  type: "Transformer"
+  input_dim: 1
+  feature_dim: 16
+  num_heads: 8
+  time_embedding_dim: 16
+  type_embedding_dim: 16
+  spatial_embedding_dim: 0
+  categorical_embedding_dim: 0
+  categorical_input: -1
+  num_layers: 3
+  attention_drop: 0.2
+  dropout: 0.2
+  query_includes_categorical: false
+optimiser_params:
+  lr: 0.0001
+  max_lr: 0.0002
+  min_lr: 0.0001
+  total_iters: 200
+logging_params:
+  name: "AGG_v4"

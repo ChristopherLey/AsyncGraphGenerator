@@ -31,6 +31,8 @@ from torch import LongTensor
 def cast_2_float_tensor(v: Union[list, FloatTensor], values: dict, field: ModelField):
     if isinstance(v, FloatTensor):
         entry = v
+    elif isinstance(v, float):
+        entry = torch.tensor([v], dtype=torch.float)
     else:
         entry = torch.tensor(v, dtype=torch.float)
     if "node_features" in values and entry.shape[0] != values["node_features"].shape[0]:
@@ -47,6 +49,8 @@ def cast_2_float_tensor(v: Union[list, FloatTensor], values: dict, field: ModelF
 def cast_2_long_tensor(v: Union[list, LongTensor], values: dict, field: ModelField):
     if isinstance(v, LongTensor):
         entry = v
+    elif isinstance(v, int):
+        entry = torch.tensor([v], dtype=torch.long)
     else:
         entry = torch.tensor(v, dtype=torch.long)
     if "node_features" in values and entry.shape[0] != values["node_features"].shape[0]:
@@ -64,7 +68,7 @@ class TargetNode(BaseModel):
     features: Union[LongTensor, FloatTensor]
     type_index: Optional[LongTensor]
     time: FloatTensor
-    spatial_index: LongTensor
+    spatial_index: Optional[LongTensor]
     category_index: Optional[Union[LongTensor, FloatTensor]]
 
     _cast_type_index: classmethod = validator("type_index", allow_reuse=True, pre=True)(
@@ -83,6 +87,8 @@ class TargetNode(BaseModel):
             entry = v
         elif isinstance(v, FloatTensor):
             entry = v
+        elif isinstance(v, float):
+            entry = torch.tensor([v], dtype=torch.float)
         else:
             if isinstance(v[0], int):
                 entry = torch.tensor(v, dtype=torch.long)
@@ -115,7 +121,8 @@ class TargetNode(BaseModel):
         if self.type_index is not None:
             self.type_index = self.type_index.unsqueeze(dim)
         self.time = self.time.unsqueeze(dim)
-        self.spatial_index = self.spatial_index.unsqueeze(dim)
+        if self.spatial_index is not None:
+            self.spatial_index = self.spatial_index.unsqueeze(dim)
 
 
 class ContinuousTimeGraphSample(BaseModel):
@@ -126,7 +133,7 @@ class ContinuousTimeGraphSample(BaseModel):
     attention_mask: BoolTensor
     target: TargetNode
     type_index: LongTensor
-    spatial_index: LongTensor
+    spatial_index: Optional[LongTensor]
     category_index: Optional[Union[LongTensor, FloatTensor]]
 
     _cast_node_features: classmethod = validator(
@@ -185,7 +192,7 @@ class ContinuousTimeGraphSample(BaseModel):
         else:
             entry = torch.tensor(v, dtype=torch.bool)
         if entry.shape[0] != values["node_features"].shape[0]:
-            raise ValueError(f"edge_index shape is incorrect: {entry.shape}")
+            raise ValueError(f"key_padding_mask shape is incorrect: {entry.shape}")
         return entry
 
     @validator("attention_mask", pre=True)
@@ -219,7 +226,8 @@ class ContinuousTimeGraphSample(BaseModel):
             self.attention_mask = self.attention_mask.unsqueeze(dim)
         self.target.unsqueeze(dim)
         self.type_index = self.type_index.unsqueeze(dim)
-        self.spatial_index = self.spatial_index.unsqueeze(dim)
+        if self.spatial_index is not None:
+            self.spatial_index = self.spatial_index.unsqueeze(dim)
         if self.category_index is not None:
             self.category_index = self.category_index.unsqueeze(dim)
 
@@ -234,10 +242,8 @@ def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
         "target": {
             "features": [],
             "time": [],
-            "spatial_index": [],
         },
         "type_index": [],
-        "spatial_index": [],
     }
     if graph_samples[0].attention_mask is not None:
         batch_graph["attention_mask"] = []
@@ -249,6 +255,10 @@ def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
         batch_graph["target"]["category_index"] = []
     if graph_samples[0].target.type_index is not None:
         batch_graph["target"]["type_index"] = []
+    if graph_samples[0].target.spatial_index is not None:
+        batch_graph["target"]["spatial_index"] = []
+    if graph_samples[0].spatial_index is not None:
+        batch_graph["spatial_index"] = []
     for sample in graph_samples:
         for key in batch_graph.keys():
             if key != "target":

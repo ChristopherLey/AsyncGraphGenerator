@@ -196,8 +196,14 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             else:
                 self.query_dim = time_embedding_dim + spatial_embedding_dim
         self.time_embed = Time2Vec(time_embedding_dim)
-        self.type_embed = nn.Embedding(num_node_types, type_embedding_dim)
-        self.spatial_embed = nn.Embedding(num_spatial_components, spatial_embedding_dim)
+        if type_embedding_dim == 0:
+            self.type_embed = None
+        else:
+            self.type_embed = nn.Embedding(num_node_types, type_embedding_dim)
+        if spatial_embedding_dim == 0:
+            self.spatial_embed = None
+        else:
+            self.spatial_embed = nn.Embedding(num_spatial_components, spatial_embedding_dim)
         self.num_categorical = num_categories
         if self.query_includes_categorical:
             if num_categories == -1:
@@ -258,12 +264,16 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
             features = self.feature_projection(
                 graph.node_features.unsqueeze(-1).to(device)
             )
-        elif len(graph.node_features.shape) >= 3:
+        else:
             features = self.feature_projection(graph.node_features.to(device))
         time_encode = self.time_embed(graph.time.unsqueeze(-1).to(device))
-        type_encode = self.type_embed(graph.type_index.to(device))
-        spatial_encode = self.spatial_embed(graph.spatial_index.to(device))
-        source_list = [features, time_encode, type_encode, spatial_encode]
+        source_list = [features, time_encode]
+        if self.type_embed is not None:
+            type_encode = self.type_embed(graph.type_index.to(device))
+            source_list.append(type_encode)
+        if self.spatial_embed is not None:
+            spatial_encode = self.spatial_embed(graph.spatial_index.to(device))
+            source_list.append(spatial_encode)
         if graph.category_index is not None:
             categorical_encode = self.categorical_embedding(
                 graph.category_index.to(device)
@@ -275,8 +285,10 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         )
         query_list = [
             self.time_embed(graph.target.time.unsqueeze(-1).to(device)),
-            self.spatial_embed(graph.target.spatial_index.to(device)),
         ]
+        if self.spatial_embed is not None:
+            target_spatial_encode = self.spatial_embed(graph.target.spatial_index.to(device))
+            query_list.append(target_spatial_encode)
         if self.query_includes_type and isinstance(
             graph.target.type_index, (torch.LongTensor, torch.FloatTensor)
         ):
