@@ -2,6 +2,7 @@ data_params:
   block_size: 1000
   sparsity: 0.8
   db_config: "Datasets/DoublePendulum/data/mongo_config.yaml"
+  data_set: "sim_1M_@0.8_0.05_0.05_100_4.0"
   batch_size: 70
   num_workers: 7
   subset: 0.1
@@ -24,18 +25,18 @@ data_params:
     signal_std: 0.05
     sampling_rate: 0.05
     samples_per_simulation: 100
-    prediction_limit: 4.0
+    prediction_limit: 2.0
 model_params:
-  type: "Transformer"
+  type: "GraphAttentionNetwork"
   input_dim: 1
-  feature_dim: 16
-  num_heads: 8
-  time_embedding_dim: 16
-  type_embedding_dim: 16
+  feature_dim: 8
+  num_heads: 4
+  time_embedding_dim: 8
+  type_embedding_dim: 8
   spatial_embedding_dim: 0
   categorical_embedding_dim: 0
   categorical_input: -1
-  num_layers: 3
+  num_layers: 2
   attention_drop: 0.2
   dropout: 0.2
   query_includes_categorical: false

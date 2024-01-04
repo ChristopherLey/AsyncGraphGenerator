@@ -48,14 +48,39 @@ graph_template: dict = {
 }
 scaler = {
     "fields": ["x_1", "y_1", "x_2", "y_2"],
-    "mean": [0, 0, 1, 1],
-    "std": [0, 0, 0, 0],
-    "time": 32705408.0,
+    "x_1": {
+        'n': 250000000,
+        'S_n': -21490.95149520851,
+        'S_n^2': 103554996.20868938,
+        'mu': -8.596380598083404e-05,
+        'std': 0.6435992366721558},
+    "y_1": {
+        'n': 250000000,
+        'S_n': -148201489.7460601,
+        'S_n^2': 147707603.53317344,
+        'mu': -0.5928059589842404,
+        'std': 0.4892969539302987
+    },
+    "x_2": {
+        'n': 250000000,
+        'S_n': 34891.564679514166,
+        'S_n^2': 236822725.16648498,
+        'mu': 0.00013956625871805667,
+        'std': 0.9732886936501417
+    },
+    "y_2": {
+        'n': 250000000,
+        'S_n': -217286563.0959773,
+        'S_n^2': 351887350.23352873,
+        'mu': -0.8691462523839092,
+        'std': 0.807548260416132
+    },
+    "time": (0.0, 80.0),
     "type": "Normal",
 }
 
 
-def generate_simulation_data(idx, block_size, sparsity, dynamics_params, generation_params):
+def generate_simulation_data(idx, block_size, sparsity, dynamics_params, generation_params, scale):
     initial_conditions = np.array([
         np.random.uniform(low=-np.pi, high=np.pi),
         np.random.normal(
@@ -74,6 +99,9 @@ def generate_simulation_data(idx, block_size, sparsity, dynamics_params, generat
     )
     noise = np.random.normal(0, generation_params["signal_std"], size=data.shape)
     data += noise
+    mu = np.array([scale['x_1']['mu'], scale['y_1']['mu'], scale['x_2']['mu'], scale['y_2']['mu']]).reshape(1, 4)
+    std = np.array([scale['x_1']['std'], scale['y_1']['std'], scale['x_2']['std'], scale['y_2']['std']]).reshape(1, 4)
+    normalised_data = (data - mu) / std
     index = np.arange(0, data.shape[0])
     categories = np.tile(np.arange(0, 4), (data.shape[0], 1))
     split_point = np.floor(index.shape[0] * 0.9).astype(int)
@@ -85,11 +113,16 @@ def generate_simulation_data(idx, block_size, sparsity, dynamics_params, generat
     remainder.sort()
     removed.sort()
     removed = np.concatenate([removed, back_index])
-    input_data = data[remainder, :]
+    input_data = normalised_data[remainder, :]
+    n = input_data.shape[0]
+    S_1 = np.sum(input_data, axis=0)
+    S_2 = np.sum(input_data ** 2, axis=0)
+    scaler_stats = [n, S_1, S_2]
+    scaled_time = (time - scale['time'][0]) / scale['time'][1]
     input_categories = categories[remainder, :]
-    input_time = np.tile(time[remainder], (4, 1))
-    target_time = np.tile(time[removed], (4, 1))
-    target_data = data[removed, :]
+    input_time = np.tile(scaled_time[remainder], (4, 1))
+    target_time = np.tile(scaled_time[removed], (4, 1))
+    target_data = normalised_data[removed, :]
     target_categories = categories[removed, :]
 
     block_input = input_data.flatten()
@@ -128,16 +161,16 @@ def generate_simulation_data(idx, block_size, sparsity, dynamics_params, generat
         graph_sample['idx'] = idx
         graph_lists.append(graph_sample)
         idx += 1
-    return graph_lists, idx
+    return graph_lists, idx, scaler_stats
 
 
 def generate_data(
-    db_config: dict, dynamics_params: dict, generation_params: dict, block_size: int, exists_ok=True, sparsity=0.5
+    db_config: dict, data_params: dict, exists_ok=True,
 ):
     mongo_db_client = MongoClient(host=db_config["host"], port=db_config["port"])
     db = mongo_db_client[db_config["base"]]
-    assert 0 < sparsity < 1.0
-    block_name = f"block_{block_size:02d}_{100 * sparsity}%"
+    assert 0 < data_params["sparsity"] < 1.0
+    block_name = data_params["data_set"]
     existing_collections = db.list_collection_names(
         filter={"name": {"$regex": block_name}}
     )
@@ -160,21 +193,36 @@ def generate_data(
             train_block.drop()
             test_block.drop()
             block_db.drop()
-    meta = {
-        "block_size": block_size,
-        "sparsity": sparsity,
-        "dynamics_params": dynamics_params,
-        "generation_params": generation_params,
-    }
-    block_db.insert_one(meta)
+    meta = data_params
     idx = 0
+    generation_params = data_params["generation_params"]
+    block_size = data_params["block_size"]
+    sparsity = data_params["sparsity"]
+    dynamics_params = data_params["dynamics_params"]
+    meta['scaler'] = scaler
+    scale = [0, np.zeros(4), np.zeros(4)]
+
     for _ in tqdm(range(0, generation_params["train_length"]//generation_params["samples_per_simulation"])):
-        graph_lists, idx = generate_simulation_data(idx, block_size, sparsity, dynamics_params, generation_params)
+        graph_lists, idx, scaler_stats = generate_simulation_data(
+            idx, block_size, sparsity, dynamics_params, generation_params, scaler)
+        scale[0] += scaler_stats[0]
+        scale[1] += scaler_stats[1]
+        scale[2] += scaler_stats[2]
         train_block.insert_many(graph_lists)
     idx = 0
     for _ in tqdm(range(0, generation_params["test_length"]//generation_params["samples_per_simulation"])):
-        graph_lists, idx = generate_simulation_data(idx, block_size, sparsity, dynamics_params, generation_params)
+        graph_lists, idx, scaler_stats = generate_simulation_data(
+            idx, block_size, sparsity, dynamics_params, generation_params, scaler)
+        scale[0] += scaler_stats[0]
+        scale[1] += scaler_stats[1]
+        scale[2] += scaler_stats[2]
         test_block.insert_many(graph_lists)
+    mu = scale[1]/scale[0]
+    print(np.abs(mu - np.array([scaler['x_1']['mu'], scaler['y_1']['mu'], scaler['x_2']['mu'], scaler['y_2']['mu']])))
+    std = np.sqrt((scale[2]/scale[0]) - mu**2)
+    print(np.abs(std - np.array([scaler['x_1']['std'], scaler['y_1']['std'], scaler['x_2']['std'], scaler['y_2']['std']])))
+    meta['scaler']['sample_stats'] = [scale[0], mu.tolist(), std.tolist()]
+    block_db.insert_one(meta)
 
 
 class DoublePendulumDataset(GraphDataset):
@@ -182,15 +230,13 @@ class DoublePendulumDataset(GraphDataset):
 
     def __init__(
         self,
-        block_size: int,
-        sparsity: float,
         db_config: Path,
-        dynamics_params: dict,
-        generation_params: dict,
+        data_params: dict,
         version: str = "train",
         create_preprocessing: bool = False,
         shuffle: bool = False,
         subset: Optional[int] = None,
+        __overwrite__: bool = False,
 
     ):
         assert (
@@ -202,25 +248,25 @@ class DoublePendulumDataset(GraphDataset):
             host=self.mongo_config["host"], port=self.mongo_config["port"]
         )
         db = mongo_db_client[self.mongo_config["base"]]
-        block_name = f"block_{block_size:02d}_{100 * sparsity}%"
-        if block_name not in db.list_collection_names():
+        data_set = data_params['data_set']
+        if data_set not in db.list_collection_names() or __overwrite__:
             if create_preprocessing:
-                print(
-                    f"No pre-processing for {block_name=}, this could take a while..."
-                )
+                if __overwrite__:
+                    print(f"Overwriting {data_set=}")
+                else:
+                    print(
+                        f"No pre-processing for {data_set=}, this could take a while..."
+                    )
                 generate_data(
                     self.mongo_config,
-                    dynamics_params,
-                    generation_params,
-                    block_size=block_size,
-                    sparsity=sparsity,
+                    data_params,
                     exists_ok=False,
                 )
             else:
-                raise Exception(f"No preprocessing data available for {block_name=}")
+                raise Exception(f"No preprocessing data available for {data_set=}")
         else:
-            print(f"Pre-processing found for {block_name=}")
-        self.preprocessing_reference = block_name
+            print(f"Pre-processing found for {data_set=}")
+        self.preprocessing_reference = data_set
         self.split = version
         db_handle = mongo_db_client[self.mongo_config["base"]][
             self.preprocessing_reference
@@ -281,15 +327,13 @@ if __name__ == "__main__":
         config = yaml.safe_load(f)
 
     datareader = DoublePendulumDataset(
-        block_size=1000,
-        sparsity=config['data_params']["sparsity"],
         db_config=Path("./data/mongo_config.yaml"),
-        dynamics_params=config['data_params']["dynamics_params"],
-        generation_params=config['data_params']["generation_params"],
+        data_params=config["data_params"],
         version="test",
         create_preprocessing=True,
         shuffle=False,
         subset=None,
+        __overwrite__=True,
     )
     print(len(datareader))
     print(datareader[0])

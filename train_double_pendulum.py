@@ -31,7 +31,7 @@ from torch.utils.data import DataLoader
 
 from AGG.extended_typing import collate_graph_samples
 from Datasets.DoublePendulum.datareader import DoublePendulumDataset
-from Datasets.DoublePendulum.experiment import AGGDoublePendulumExperiment
+from Datasets.DoublePendulum.experiment import ATGDoublePendulumExperiment, AGGDoublePendulumExperiment
 
 
 def main():
@@ -80,11 +80,8 @@ def main():
     ):
         assert config["data_params"]["subset"] < 1.0
         train_reader = DoublePendulumDataset(
-            block_size=config["data_params"]["block_size"],
-            sparsity=config["data_params"]["sparsity"],
             db_config=Path(config["data_params"]["db_config"]),
-            dynamics_params=config['data_params']["dynamics_params"],
-            generation_params=config['data_params']["generation_params"],
+            data_params=config["data_params"],
             create_preprocessing=True,
             version="train",
         )
@@ -97,11 +94,8 @@ def main():
         subset = None
         shuffle = False
     train_reader = DoublePendulumDataset(
-        block_size=config["data_params"]["block_size"],
-        sparsity=config["data_params"]["sparsity"],
         db_config=Path(config["data_params"]["db_config"]),
-        dynamics_params=config['data_params']["dynamics_params"],
-        generation_params=config['data_params']["generation_params"],
+        data_params=config["data_params"],
         version="train",
         subset=subset,
         shuffle=shuffle,
@@ -116,11 +110,8 @@ def main():
         persistent_workers=config["data_params"]["persistent_workers"],
     )
     val_reader = DoublePendulumDataset(
-        block_size=config["data_params"]["block_size"],
-        sparsity=config["data_params"]["sparsity"],
         db_config=Path(config["data_params"]["db_config"]),
-        dynamics_params=config['data_params']["dynamics_params"],
-        generation_params=config['data_params']["generation_params"],
+        data_params=config["data_params"],
         version="test",
     )
     val_dataloader = DataLoader(
@@ -137,12 +128,21 @@ def main():
     config["model_params"]["num_spatial_components"] = len(train_reader.spatial_index)
     config["model_params"]["num_categories"] = len(train_reader.category_index)
 
-    model = AGGDoublePendulumExperiment(
-        model_params=config["model_params"],
-        optimiser_params=config["optimiser_params"],
-        data_params=config["data_params"],
-        logging_params=config["logging_params"],
-    )
+    if config["model_params"]["type"] == "Transformer":
+        model = ATGDoublePendulumExperiment(
+            model_params=config["model_params"],
+            optimiser_params=config["optimiser_params"],
+            data_params=config["data_params"],
+            logging_params=config["logging_params"],
+        )
+    else:
+        model = AGGDoublePendulumExperiment(
+            model_params=config["model_params"],
+            optimiser_params=config["optimiser_params"],
+            data_params=config["data_params"],
+            logging_params=config["logging_params"],
+        )
+
     mse_callback = ModelCheckpoint(
         monitor="val_mse_loss",
         save_top_k=4,
@@ -157,34 +157,36 @@ def main():
     )
 
     callbacks = [mse_callback, mae_callback]
-
+    now = f"{datetime.now().strftime('%d-%m_%H-%M-%S')}"
     version_path = (
-        f"AGG-dble_pend_{int(config['data_params']['sparsity'] * 100)}%_"
-        f"inter-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
+        f"AGG-double_pendulum-{now}"
     )
 
-    tb_logger = pl_loggers.TensorBoardLogger(
+    wandb_logger = pl_loggers.WandbLogger(
         save_dir=".",
         version=version_path,
+        project="AGG",
+        name=f"Double Pendulum Interpolation - {now}",
+        log_model="all",
     )
 
     trainer = pl.Trainer(
         accelerator="gpu",
         devices=[0],
-        logger=tb_logger,
+        logger=wandb_logger,
         callbacks=callbacks,
         max_epochs=1000,
         log_every_n_steps=1,
         gradient_clip_val=1.0,
     )
 
-    pprint(config)
-    for key, value in config.items():
-        trainer.logger.experiment.add_text(key, str(value), global_step=0)
+    # log_path = Path("")
+    # with open(log_path / "config.yaml", "w") as yml_file:
+    #     yaml.dump(config, yml_file, default_flow_style=False)
 
-    log_path = Path(tb_logger.log_dir)
-    with open(log_path / "config.yaml", "w") as yml_file:
-        yaml.dump(config, yml_file, default_flow_style=False)
+    pprint(config)
+    wandb_logger.experiment.config.update(config)
+    wandb_logger.watch(model, log="all")
 
     trainer.fit(model, train_dataloader, val_dataloader, ckpt_path=ckpt_path)
 
