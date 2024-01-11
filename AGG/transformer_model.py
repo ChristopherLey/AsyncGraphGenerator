@@ -37,6 +37,8 @@ class SelfAttentionBlock(nn.Module):
         attention_drop: float = 0.2,
         dropout: float = 0.2,
         batch_first: bool = True,
+        hidden_dim: Optional[int] = None,
+        output_dim: Optional[int] = None,
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)  # node normalisation
@@ -49,10 +51,14 @@ class SelfAttentionBlock(nn.Module):
             batch_first=batch_first,
         )
         self.num_heads = num_heads
+        if hidden_dim is None:
+            hidden_dim = embed_dim * num_heads
+        if output_dim is None:
+            output_dim = embed_dim
         self.feed_forward = FeedForward(
             input_size=embed_dim,
-            hidden_dim=embed_dim * num_heads,
-            output_size=embed_dim,
+            hidden_dim=hidden_dim,
+            output_size=output_dim,
             dropout=dropout,
         )
         self.norm2 = nn.LayerNorm(embed_dim)
@@ -93,6 +99,7 @@ class CrossAttentionBlock(nn.Module):
         attention_drop: float = 0.2,
         dropout: float = 0.2,
         batch_first: bool = True,
+        hidden_dim: Optional[int] = None,
     ):
         super().__init__()
         self.norm1_source = nn.LayerNorm(source_dim)  # node normalisation
@@ -106,9 +113,11 @@ class CrossAttentionBlock(nn.Module):
             batch_first=batch_first,
         )
         self.norm2 = nn.LayerNorm(target_dim)
+        if hidden_dim is None:
+            hidden_dim = target_dim * num_heads
         self.feed_forward = FeedForward(
             input_size=target_dim,
-            hidden_dim=target_dim * num_heads,
+            hidden_dim=hidden_dim,
             output_size=target_dim,
             dropout=dropout,
         )

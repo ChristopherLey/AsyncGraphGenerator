@@ -136,14 +136,20 @@ def generate_simulation_data(idx, block_size, sparsity, dynamics_params, generat
     less_than_prediction_limit = block_target_time <= (block_time[-1] + generation_params["prediction_limit"])
     less_than_interpolation_limit = block_target_time <= (block_time[-1])
 
-    samples_per_simulation = generation_params["samples_per_simulation"]//2
+    if generation_params["prediction_limit"] > 0:
+        samples_per_simulation = generation_params["samples_per_simulation"]//2
+    else:
+        samples_per_simulation = generation_params["samples_per_simulation"]
     interpolation_mask = np.logical_and(greater_than_input, less_than_prediction_limit)
     interpolation_samples = np.argwhere(interpolation_mask).flatten()
     selected_interpolation_samples = np.random.choice(interpolation_samples, samples_per_simulation, replace=False)
-    prediction_mask = np.logical_and(np.logical_not(less_than_interpolation_limit), less_than_prediction_limit)
-    prediction_samples = np.argwhere(prediction_mask).flatten()
-    selected_prediction_samples = np.random.choice(prediction_samples, samples_per_simulation, replace=False)
-    samples = np.concatenate([selected_interpolation_samples, selected_prediction_samples])
+    if generation_params["prediction_limit"] > 0:
+        prediction_mask = np.logical_and(np.logical_not(less_than_interpolation_limit), less_than_prediction_limit)
+        prediction_samples = np.argwhere(prediction_mask).flatten()
+        selected_prediction_samples = np.random.choice(prediction_samples, samples_per_simulation, replace=False)
+        samples = np.concatenate([selected_interpolation_samples, selected_prediction_samples])
+    else:
+        samples = selected_interpolation_samples
     samples.sort()
 
     base_graph = copy.deepcopy(graph_template)

@@ -132,7 +132,7 @@ class ContinuousTimeGraphSample(BaseModel):
     time: FloatTensor
     attention_mask: BoolTensor
     target: TargetNode
-    type_index: LongTensor
+    type_index: Optional[LongTensor]
     spatial_index: Optional[LongTensor]
     category_index: Optional[Union[LongTensor, FloatTensor]]
 
@@ -218,18 +218,19 @@ class ContinuousTimeGraphSample(BaseModel):
 
     def unsqueeze(self, dim: int = 0):
         self.node_features = self.node_features.unsqueeze(dim)
+        self.time = self.time.unsqueeze(dim)
         self.key_padding_mask = self.key_padding_mask.unsqueeze(dim)
         if self.edge_index is not None:
             self.edge_index = self.edge_index.unsqueeze(dim)
-        self.time = self.time.unsqueeze(dim)
         if self.attention_mask is not None:
             self.attention_mask = self.attention_mask.unsqueeze(dim)
-        self.target.unsqueeze(dim)
-        self.type_index = self.type_index.unsqueeze(dim)
+        if self.type_index is not None:
+            self.type_index = self.type_index.unsqueeze(dim)
         if self.spatial_index is not None:
             self.spatial_index = self.spatial_index.unsqueeze(dim)
         if self.category_index is not None:
             self.category_index = self.category_index.unsqueeze(dim)
+        self.target.unsqueeze(dim)
 
 
 def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
@@ -243,8 +244,9 @@ def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
             "features": [],
             "time": [],
         },
-        "type_index": [],
     }
+    if graph_samples[0].type_index is not None:
+        batch_graph["type_index"] = []
     if graph_samples[0].attention_mask is not None:
         batch_graph["attention_mask"] = []
     if graph_samples[0].edge_index is not None:

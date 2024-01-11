@@ -14,7 +14,7 @@ class GraphDataset(Dataset):
     def graph_transform(sample: dict):
         if "attention_mask" not in sample or len(sample["attention_mask"]) == 0:
             sample["time"] = torch.tensor(sample["time"], dtype=torch.float)
-            sample["attention_mask"] = sample["time"].unsqueeze(-1).T < sample[
+            sample["attention_mask"] = sample["time"].unsqueeze(-1).T <= sample[
                 "time"
             ].unsqueeze(-1)
         if "edge_index" in sample and len(sample["edge_index"]) == 0:

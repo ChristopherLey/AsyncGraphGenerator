@@ -70,6 +70,9 @@ def main():
         print("Debugging Mode")
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
         config["data_params"]["num_workers"] = 0
+        persistent_workers = False
+    else:
+        persistent_workers = True
     # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
     if (
         "subset" in config["data_params"]
@@ -107,7 +110,7 @@ def main():
         drop_last=False,
         num_workers=config["data_params"]["num_workers"],
         collate_fn=collate_graph_samples,
-        persistent_workers=True,
+        persistent_workers=persistent_workers,
     )
     val_reader = KDDInterpolationDataset(
         block_size=config["data_params"]["block_size"],
@@ -123,12 +126,13 @@ def main():
         drop_last=False,
         num_workers=config["data_params"]["num_workers"],
         collate_fn=collate_graph_samples,
-        persistent_workers=True,
+        persistent_workers=persistent_workers,
     )
 
     config["model_params"]["num_node_types"] = len(train_reader.type_index)
     config["model_params"]["num_spatial_components"] = len(train_reader.spatial_index)
     config["model_params"]["num_categories"] = len(train_reader.category_index)
+    config['logging_params']['scaling'] = train_reader.meta_data['scaling']
 
     model = AGGExperimentKDDInterpolation(
         model_params=config["model_params"],
@@ -142,14 +146,21 @@ def main():
         mode="min",
         filename="model-{epoch:02d}-{val_mse_loss:.6f}",
     )
-    mae_callback = ModelCheckpoint(
+    rmse_callback = ModelCheckpoint(
         monitor="val_RMSE_epoch",
         save_top_k=4,
         mode="min",
         filename="model-{epoch:02d}-{val_RMSE_epoch:.6f}",
     )
+    mae_callback = ModelCheckpoint(
+        monitor="val_MAE_PM25_epoch",
+        save_top_k=4,
+        mode="min",
+        filename="model-{epoch:02d}-{val_MAE_epoch:.6f}",
+    )
 
-    callbacks = [mse_callback, mae_callback]
+
+    callbacks = [mse_callback, rmse_callback, mae_callback]
 
     version_path = (
         f"AGG-kdd_{int(config['data_params']['sparsity'] * 100)}%_"

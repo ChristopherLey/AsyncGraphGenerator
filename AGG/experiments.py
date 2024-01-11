@@ -599,8 +599,14 @@ class AGGExperimentKDDInterpolation(pl.LightningModule):
         self.batch_size = (
             self.data_params["batch_size"] if "batch_size" in data_params else None
         )
+        if logging_params["scaling"] is not None:
+            self.scaler = logging_params["scaling"]
+        else:
+            self.scaler = None
         self.train_MAE = MeanAbsoluteError()
         self.val_MAE = MeanAbsoluteError()
+        self.train_MAE_PM25 = MeanAbsoluteError()
+        self.val_MAE_PM25 = MeanAbsoluteError()
         self.train_RMSE = MeanSquaredError(squared=False)
         self.val_RMSE = MeanSquaredError(squared=False)
         self.train_PM25_RMSE = MeanSquaredError(squared=False)
@@ -615,6 +621,12 @@ class AGGExperimentKDDInterpolation(pl.LightningModule):
             y_hat = y_hat.unsqueeze(0)
         loss = self.calc_loss(y_hat, graph.target.features.to(self.device))
         return loss, y_hat, attention_list
+
+    def rescale_normal_data(self, data: torch.Tensor, key: str = 'PM2.5'):
+        if self.scaler is None:
+            return data
+        scaling = self.scaler[key]
+        return data*scaling['std'] + scaling['mean']
 
     def training_step(
         self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
@@ -640,10 +652,20 @@ class AGGExperimentKDDInterpolation(pl.LightningModule):
         )
         pm25_mask = graph_sample.target.type_index == 0
         if pm25_mask.any():
-            self.train_PM25_RMSE(y_hat[pm25_mask], target[pm25_mask])
+            y_hat_PM25 = self.rescale_normal_data(y_hat[pm25_mask], key='PM2.5')
+            target_PM25 = self.rescale_normal_data(target[pm25_mask], key='PM2.5')
+            self.train_PM25_RMSE(y_hat_PM25, target_PM25)
             self.log(
                 "train_PM25_RMSE",
                 self.train_PM25_RMSE,
+                on_step=True,
+                on_epoch=True,
+                batch_size=self.batch_size,
+            )
+            self.train_MAE_PM25(y_hat_PM25, target_PM25)
+            self.log(
+                "train_MAE_PM25",
+                self.train_MAE_PM25,
                 on_step=True,
                 on_epoch=True,
                 batch_size=self.batch_size,
@@ -676,10 +698,20 @@ class AGGExperimentKDDInterpolation(pl.LightningModule):
         )
         pm25_mask = graph_sample.target.type_index == 0
         if pm25_mask.any():
-            self.val_PM25_RMSE(y_hat[pm25_mask], target[pm25_mask])
+            y_hat_PM25 = self.rescale_normal_data(y_hat[pm25_mask], key='PM2.5')
+            target_PM25 = self.rescale_normal_data(target[pm25_mask], key='PM2.5')
+            self.val_PM25_RMSE(y_hat_PM25, target_PM25)
             self.log(
                 "val_PM25_RMSE",
                 self.val_PM25_RMSE,
+                on_step=True,
+                on_epoch=True,
+                batch_size=self.batch_size,
+            )
+            self.val_MAE_PM25(y_hat_PM25, target_PM25)
+            self.log(
+                "val_MAE_PM25",
+                self.val_MAE_PM25,
                 on_step=True,
                 on_epoch=True,
                 batch_size=self.batch_size,
