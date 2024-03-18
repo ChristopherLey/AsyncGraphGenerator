@@ -40,7 +40,7 @@ from Datasets.Beijing.datareader import unique_stations
 sns.set()
 
 figure_path = Path("AGG_diagrams")
-model_path = Path("lightning_logs/AGG-kdd_30%_inter-25-08_23:22:17")
+model_path = Path("archived_logs/lightning_logs/AGG-kdd_30%_inter-25-08_23:22:17")
 model_config_path = model_path / "config.yaml"
 best_checkpoint = (
     model_path / "checkpoints" / "model-epoch=05-val_RMSE_epoch=0.157463.ckpt"

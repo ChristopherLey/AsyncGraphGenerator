@@ -786,7 +786,7 @@ class AirQualityDataRegression(Dataset):
         return edge_index
 
     @staticmethod
-    def graph_transform(sample: dict):
+    def graph_transform(sample: dict) -> ContinuousTimeGraphSample:
         if "attention_mask" not in sample or len(sample["attention_mask"]) == 0:
             sample["time"] = torch.tensor(sample["time"], dtype=torch.float)
             sample["attention_mask"] = sample["time"].unsqueeze(-1).T < sample[
@@ -809,7 +809,7 @@ class AirQualityDataRegression(Dataset):
         else:
             return self.subset
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: ContinuousTimeGraphSample):
         if not self.lazy_loaded:
             self.lazy_load_db()
         if self.shuffle:
