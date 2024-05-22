@@ -29,9 +29,9 @@ from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 
-from AGG.experiments import AGGExperimentKDDInterpolation
+from AGG.experiments import AGGExperimentAQIInterpolation
 from AGG.extended_typing import collate_graph_samples
-from Datasets.Beijing.datareader import KDDInterpolationDataset
+from Datasets.GRIN_Data.datareader import AQIInterpolationDataset
 
 
 def main():
@@ -42,7 +42,7 @@ def main():
         dest="filename",
         metavar="FILE",
         help="path to the config file",
-        default="kdd_config.yaml",
+        default="aqi_config.yaml",
     )
     parser.add_argument(
         "--resume-ckpt",
@@ -50,31 +50,22 @@ def main():
         dest="ckpt",
         metavar="FILE",
         help="path to checkpoint",
-        default="lightning_logs/AGG-aqi_Transformer_10%_steps_150_inter-15-05_19:52:47/checkpoints/model-epoch=464-val_RMSE_epoch=0.174923.ckpt",
-        # default=None,
+        default=None,
     )
     args = parser.parse_args()
     if args.ckpt is not None:
-        ckpt_path = args.ckpt
-        ckpt_config = Path(f"{Path(args.ckpt).parent.parent}") / "config.yaml"
-        # args.filename = (
-        #     Path(f"{ckpt_path.parent.parent}") / "config.yaml"
-        # )
-        with open(ckpt_config, "r") as file:
-            try:
-                model_config = yaml.safe_load(file)
-            except yaml.YAMLError as exc:
-                print(exc)
+        ckpt_path = Path(args.ckpt)
+        args.filename = (
+            Path(f"{ckpt_path.parts[0]}/{ckpt_path.parts[1]}") / "config.yaml"
+        )
     else:
         ckpt_path = None
-        model_config = None
     with open(args.filename, "r") as file:
         try:
             config = yaml.safe_load(file)
         except yaml.YAMLError as exc:
             print(exc)
-    if model_config is not None:
-        config['model_params'] = model_config['model_params']
+
     if hasattr(sys, "gettrace") and sys.gettrace() is not None:
         print("Debugging Mode")
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -83,18 +74,24 @@ def main():
     else:
         persistent_workers = True
     # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
+    if "include_topography" in config["data_params"]:
+        include_topography = config["data_params"]["include_topography"]
+    else:
+        include_topography = False
     if (
         "subset" in config["data_params"]
         and config["data_params"]["subset"] is not None
     ):
         assert config["data_params"]["subset"] < 1.0
-        train_reader = KDDInterpolationDataset(
+        train_reader = AQIInterpolationDataset(
             block_size=config["data_params"]["block_size"],
             sparsity=config["data_params"]["sparsity"],
+            block_steps_percent=config["data_params"]["block_steps_percent"],
             db_config=Path(config["data_params"]["db_config"]),
+            dataset=config["data_params"]["dataset"],
             version="train",
-            block_steps=config['data_params']['block_steps'],
-            strict_pm25=config['data_params']['strict_pm25'],
+            create_preprocessing=True,
+            include_topography=include_topography,
         )
         train_length = len(train_reader)
         subset = floor(train_length * config["data_params"]["subset"])
@@ -104,32 +101,34 @@ def main():
     else:
         subset = None
         shuffle = False
-    train_reader = KDDInterpolationDataset(
-        block_size=config["data_params"]["block_size"],
-        sparsity=config["data_params"]["sparsity"],
-        db_config=Path(config["data_params"]["db_config"]),
-        version="train",
-        subset=subset,
-        shuffle=shuffle,
-        block_steps=config['data_params']['block_steps'],
-        strict_pm25=config['data_params']['strict_pm25'],
-    )
+    train_reader = AQIInterpolationDataset(
+            block_size=config["data_params"]["block_size"],
+            sparsity=config["data_params"]["sparsity"],
+            block_steps_percent=config["data_params"]["block_steps_percent"],
+            db_config=Path(config["data_params"]["db_config"]),
+            dataset=config["data_params"]["dataset"],
+            version="train",
+            subset=subset,
+            shuffle=shuffle,
+            include_topography=include_topography,
+        )
     train_dataloader = DataLoader(
         train_reader,
-        shuffle=False if shuffle else True,
+        shuffle=False,
         batch_size=config["data_params"]["batch_size"],
         drop_last=False,
         num_workers=config["data_params"]["num_workers"],
         collate_fn=collate_graph_samples,
         persistent_workers=persistent_workers,
     )
-    val_reader = KDDInterpolationDataset(
+    val_reader = AQIInterpolationDataset(
         block_size=config["data_params"]["block_size"],
         sparsity=config["data_params"]["sparsity"],
+        block_steps_percent=config["data_params"]["block_steps_percent"],
         db_config=Path(config["data_params"]["db_config"]),
+        dataset=config["data_params"]["dataset"],
         version="test",
-        block_steps=config['data_params']['block_steps'],
-        strict_pm25=config['data_params']['strict_pm25'],
+        include_topography=include_topography,
     )
     val_dataloader = DataLoader(
         val_reader,
@@ -141,12 +140,11 @@ def main():
         persistent_workers=persistent_workers,
     )
 
-    config["model_params"]["num_node_types"] = len(train_reader.type_index)
-    config["model_params"]["num_spatial_components"] = len(train_reader.spatial_index)
-    config["model_params"]["num_categories"] = len(train_reader.category_index)
-    config['logging_params']['scaling'] = train_reader.meta_data['scaling']
+    if "num_spatial_components" not in config["model_params"]:
+        config["model_params"]["num_spatial_components"] = len(train_reader.config["stations"])
+    config['logging_params']['scaling'] = train_reader.config['preprocessing']
 
-    model = AGGExperimentKDDInterpolation(
+    model = AGGExperimentAQIInterpolation(
         model_params=config["model_params"],
         optimiser_params=config["optimiser_params"],
         data_params=config["data_params"],
@@ -158,25 +156,18 @@ def main():
         mode="min",
         filename="model-{epoch:02d}-{val_mse_loss:.6f}",
     )
-    rmse_callback = ModelCheckpoint(
-        monitor="val_RMSE_epoch",
+    mae_callback = ModelCheckpoint(
+        monitor="val_MAE",
         save_top_k=4,
         mode="min",
         filename="model-{epoch:02d}-{val_RMSE_epoch:.6f}",
     )
-    mae_callback = ModelCheckpoint(
-        monitor="val_MAE_PM25_epoch",
-        save_top_k=4,
-        mode="min",
-        filename="model-{epoch:02d}-{val_MAE_epoch:.6f}",
-    )
 
-
-    callbacks = [mse_callback, rmse_callback, mae_callback]
+    callbacks = [mse_callback, mae_callback]
 
     version_path = (
-        f"AGG-aqi_{config['model_params']['type']}_{int(config['data_params']['sparsity'] * 100)}%_"
-        f"steps_{config['data_params']['block_steps']}_"
+        f"{config['logging_params']['name']}-aqi_{int(config['data_params']['sparsity'] * 100):02d}%_"
+        f"steps_{int(config['data_params']['block_steps_percent']*100):02d}_"
         f"inter-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
     )
 
@@ -192,7 +183,7 @@ def main():
         callbacks=callbacks,
         max_epochs=1000,
         log_every_n_steps=1,
-        gradient_clip_val=1.0,
+        **config["trainer_params"],
     )
 
     pprint(config)

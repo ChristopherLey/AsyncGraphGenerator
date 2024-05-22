@@ -80,8 +80,9 @@ def main():
             block_size=config["data_params"]["block_size"],
             sparsity=config["data_params"]["sparsity"],
             db_config=Path(config["data_params"]["db_config"]),
-            create_preprocessing=False,
+            create_preprocessing=True,
             version="train",
+            k_fold=None,
         )
         train_length = len(train_reader)
         subset = floor(train_length * config["data_params"]["subset"])
@@ -98,6 +99,7 @@ def main():
         version="train",
         subset=subset,
         shuffle=shuffle,
+        k_fold=None,
     )
     train_dataloader = DataLoader(
         train_reader,
@@ -112,6 +114,7 @@ def main():
         sparsity=config["data_params"]["sparsity"],
         db_config=Path(config["data_params"]["db_config"]),
         version="test",
+        k_fold=None,
     )
     val_dataloader = DataLoader(
         val_reader,
@@ -148,7 +151,10 @@ def main():
 
     callbacks = [mse_callback, mae_callback]
 
-    version_path = f"AGG-icu-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
+    version_path = (
+        f"AGG-icu-{config['model_params']['type']}_{int(config['data_params']['sparsity'] * 100)}%_"
+        f"inter-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
+    )
 
     tb_logger = pl_loggers.TensorBoardLogger(
         save_dir=".",

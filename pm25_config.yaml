@@ -1,5 +1,5 @@
 data_params:
-  block_size: 10
+  block_size: 2
   db_config: "./Datasets/Beijing/data/mongo_config.yaml"
   batch_size: 50
   num_workers: 14

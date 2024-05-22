@@ -15,74 +15,77 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-from typing import List
-from typing import Optional
-from typing import Union
-
 import torch
 from pydantic import BaseModel
-from pydantic import validator
-from pydantic.fields import ModelField
+from pydantic import field_validator
+from pydantic import ValidationInfo
 from torch import BoolTensor
 from torch import FloatTensor
 from torch import LongTensor
+import numpy as np
 
 
-def cast_2_float_tensor(v: Union[list, FloatTensor], values: dict, field: ModelField):
+def cast_2_float_tensor(v: list | FloatTensor, info: ValidationInfo, **kwargs):
     if isinstance(v, FloatTensor):
         entry = v
     elif isinstance(v, float):
         entry = torch.tensor([v], dtype=torch.float)
     else:
         entry = torch.tensor(v, dtype=torch.float)
-    if "node_features" in values and entry.shape[0] != values["node_features"].shape[0]:
+    if (
+        "node_features" in info.data
+        and entry.shape[0] != info.data["node_features"].shape[0]
+    ):
         raise ValueError(
-            f"{field.name} shape: {entry.shape} != node_features.shape {values['node_features'].shape}"
+            f"{info.field_name} shape: {entry.shape} != node_features.shape {info.data['node_features'].shape}"
         )
-    elif "features" in values and entry.shape[0] != values["features"].shape[0]:
+    elif "features" in info.data and entry.shape[0] != info.data["features"].shape[0]:
         raise ValueError(
-            f"{field.name} shape: {entry.shape} != features.shape {values['node_features'].shape}"
+            f"{info.field_name} shape: {entry.shape} != features.shape {info.data['node_features'].shape}"
         )
     return torch.nan_to_num(entry)
 
 
-def cast_2_long_tensor(v: Union[list, LongTensor], values: dict, field: ModelField):
+def cast_2_long_tensor(v: list | LongTensor, info: ValidationInfo, **kwargs):
     if isinstance(v, LongTensor):
         entry = v
     elif isinstance(v, int):
         entry = torch.tensor([v], dtype=torch.long)
+    elif isinstance(v, list) and len(v) == 0:
+        return None
     else:
         entry = torch.tensor(v, dtype=torch.long)
-    if "node_features" in values and entry.shape[0] != values["node_features"].shape[0]:
+    if (
+        "node_features" in info.data
+        and entry.shape[0] != info.data["node_features"].shape[0]
+    ):
         raise ValueError(
-            f"{field.name} shape: {entry.shape} != node_features.shape {values['node_features'].shape}"
+            f"{info.field_name} shape: {entry.shape} != node_features.shape {info.data['node_features'].shape}"
         )
-    elif "features" in values and entry.shape[0] != values["features"].shape[0]:
+    elif "features" in info.data and entry.shape[0] != info.data["features"].shape[0]:
         raise ValueError(
-            f"{field.name} shape: {entry.shape} != features.shape {values['node_features'].shape}"
+            f"{info.field_name} shape: {entry.shape} != features.shape {info.data['features'].shape}"
         )
     return entry
 
 
 class TargetNode(BaseModel):
-    features: Union[LongTensor, FloatTensor]
-    type_index: Optional[LongTensor]
+    features: LongTensor | FloatTensor
+    type_index: LongTensor | None = None
     time: FloatTensor
-    spatial_index: Optional[LongTensor]
-    category_index: Optional[Union[LongTensor, FloatTensor]]
+    spatial_index: LongTensor | FloatTensor | None = None
+    category_index: LongTensor | FloatTensor | None = None
 
-    _cast_type_index: classmethod = validator("type_index", allow_reuse=True, pre=True)(
+    _cast_type_index: classmethod = field_validator("type_index", mode="before")(
         cast_2_long_tensor
     )
-    _cast_time: classmethod = validator("time", allow_reuse=True, pre=True)(
+    _cast_time: classmethod = field_validator("time", mode="before")(
         cast_2_float_tensor
     )
-    _cast_spatial_index: classmethod = validator(
-        "spatial_index", allow_reuse=True, pre=True
-    )(cast_2_long_tensor)
 
-    @validator('features', pre=True)
-    def create_features(cls, v: Union[dict, LongTensor, FloatTensor], values: dict):
+    @field_validator("features", mode="before")
+    @classmethod
+    def create_features(cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo):
         if isinstance(v, LongTensor):
             entry = v
         elif isinstance(v, FloatTensor):
@@ -97,14 +100,38 @@ class TargetNode(BaseModel):
                 entry = torch.nan_to_num(entry)
         return entry
 
-    @validator("category_index", pre=True)
+    @field_validator("category_index", mode="before")
+    @classmethod
     def create_category_index(
-        cls, v: Union[dict, LongTensor, FloatTensor], values: dict
+        cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
     ):
         if isinstance(v, LongTensor):
             entry = v
         elif isinstance(v, FloatTensor):
             entry = v
+        elif isinstance(v, list) and len(v) == 0:
+            return None
+        else:
+            if isinstance(v[0], int):
+                entry = torch.tensor(v, dtype=torch.long)
+            else:
+                entry = torch.tensor(v, dtype=torch.float)
+                entry = torch.nan_to_num(entry)
+        return entry
+
+    @field_validator("spatial_index", mode="before")
+    @classmethod
+    def create_spatial_index(
+            cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
+    ):
+        if isinstance(v, LongTensor):
+            entry = v
+        elif isinstance(v, FloatTensor):
+            entry = v
+        elif isinstance(v, np.ndarray):
+            entry = torch.tensor(v, dtype=torch.float)
+        elif isinstance(v, list) and len(v) == 0:
+            return None
         else:
             if isinstance(v[0], int):
                 entry = torch.tensor(v, dtype=torch.long)
@@ -127,37 +154,37 @@ class TargetNode(BaseModel):
 
 class ContinuousTimeGraphSample(BaseModel):
     node_features: FloatTensor
-    key_padding_mask: BoolTensor
-    edge_index: Optional[LongTensor]
+    key_padding_mask: BoolTensor | None = None
+    edge_index: LongTensor | None = None
     time: FloatTensor
     attention_mask: BoolTensor
     target: TargetNode
-    type_index: Optional[LongTensor]
-    spatial_index: Optional[LongTensor]
-    category_index: Optional[Union[LongTensor, FloatTensor]]
+    type_index: LongTensor | None = None
+    spatial_index: LongTensor | FloatTensor | None = None
+    category_index: LongTensor | FloatTensor | None = None
 
-    _cast_node_features: classmethod = validator(
-        "node_features", allow_reuse=True, pre=True
-    )(cast_2_float_tensor)
-
-    _cast_time: classmethod = validator("time", allow_reuse=True, pre=True)(
+    _cast_node_features: classmethod = field_validator("node_features", mode="before")(
         cast_2_float_tensor
     )
-    _cast_type_index: classmethod = validator("type_index", allow_reuse=True, pre=True)(
+
+    _cast_time: classmethod = field_validator("time", mode="before")(
+        cast_2_float_tensor
+    )
+    _cast_type_index: classmethod = field_validator("type_index", mode="before")(
         cast_2_long_tensor
     )
-    _cast_spatial_index: classmethod = validator(
-        "spatial_index", allow_reuse=True, pre=True
-    )(cast_2_long_tensor)
 
-    @validator("category_index", pre=True)
+    @field_validator("category_index", mode="before")
+    @classmethod
     def create_category_index(
-        cls, v: Union[dict, LongTensor, FloatTensor], values: dict
+        cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
     ):
         if isinstance(v, LongTensor):
             entry = v
         elif isinstance(v, FloatTensor):
             entry = v
+        elif isinstance(v, list) and len(v) == 0:
+            return None
         else:
             if isinstance(v[0], int):
                 entry = torch.tensor(v, dtype=torch.long)
@@ -166,15 +193,17 @@ class ContinuousTimeGraphSample(BaseModel):
                 entry = torch.nan_to_num(entry)
         return entry
 
-    @validator("target", pre=True)
-    def create_target_node(cls, v: Union[dict, TargetNode]):
+    @field_validator("target", mode="before")
+    @classmethod
+    def create_target_node(cls, v: dict | TargetNode):
         if isinstance(v, TargetNode):
             return v
         else:
             return TargetNode(**v)
 
-    @validator("edge_index", pre=True)
-    def create_edge_index(cls, v: Union[list, LongTensor]):
+    @field_validator("edge_index", mode="before")
+    @classmethod
+    def create_edge_index(cls, v: list | LongTensor):
         if isinstance(v, LongTensor):
             entry = v
         else:
@@ -183,34 +212,53 @@ class ContinuousTimeGraphSample(BaseModel):
             raise ValueError()
         return entry
 
-    @validator("key_padding_mask", pre=True)
-    def create_key_padding_mask(
-        cls, v: Union[list, BoolTensor], values: dict, field: ModelField
-    ):
+    @field_validator("key_padding_mask", mode="before")
+    @classmethod
+    def create_key_padding_mask(cls, v: list | BoolTensor, info: ValidationInfo):
         if isinstance(v, BoolTensor):
             entry = v
         else:
             entry = torch.tensor(v, dtype=torch.bool)
-        if entry.shape[0] != values["node_features"].shape[0]:
+        if entry.shape[0] != info.data["node_features"].shape[0]:
             raise ValueError(f"key_padding_mask shape is incorrect: {entry.shape}")
         return entry
 
-    @validator("attention_mask", pre=True)
-    def cast_attention(
-        cls, v: Union[list, BoolTensor], values: dict, field: ModelField
-    ):
+    @field_validator("attention_mask", mode="before")
+    @classmethod
+    def cast_attention(cls, v: list | BoolTensor, info: ValidationInfo):
         if isinstance(v, BoolTensor):
             entry = v
         else:
             entry = torch.tensor(v, dtype=torch.bool)
         if (
-            entry.shape[-1] != values["time"].shape[-1]
-            or entry.shape[-2] != values["time"].shape[-1]
+            entry.shape[-1] != info.data["time"].shape[-1]
+            or entry.shape[-2] != info.data["time"].shape[-1]
         ):
             raise ValueError(
-                f"{field.name} shape: {entry.shape} != "
-                f"[{values['time'].shape[-1]}, {values['time'].shape[-1]}]"
+                f"{info.field_name} shape: {entry.shape} != "
+                f"[{info.data['time'].shape[-1]}, {info.data['time'].shape[-1]}]"
             )
+        return entry
+
+    @field_validator("spatial_index", mode="before")
+    @classmethod
+    def create_spatial_index(
+            cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
+    ):
+        if isinstance(v, LongTensor):
+            entry = v
+        elif isinstance(v, FloatTensor):
+            entry = v
+        elif isinstance(v, np.ndarray):
+            entry = torch.tensor(v, dtype=torch.float)
+        elif isinstance(v, list) and len(v) == 0:
+            return None
+        else:
+            if isinstance(v[0], int):
+                entry = torch.tensor(v, dtype=torch.long)
+            else:
+                entry = torch.tensor(v, dtype=torch.float)
+                entry = torch.nan_to_num(entry)
         return entry
 
     class Config:
@@ -219,7 +267,8 @@ class ContinuousTimeGraphSample(BaseModel):
     def unsqueeze(self, dim: int = 0):
         self.node_features = self.node_features.unsqueeze(dim)
         self.time = self.time.unsqueeze(dim)
-        self.key_padding_mask = self.key_padding_mask.unsqueeze(dim)
+        if self.key_padding_mask is not None:
+            self.key_padding_mask = self.key_padding_mask.unsqueeze(dim)
         if self.edge_index is not None:
             self.edge_index = self.edge_index.unsqueeze(dim)
         if self.attention_mask is not None:
@@ -233,18 +282,20 @@ class ContinuousTimeGraphSample(BaseModel):
         self.target.unsqueeze(dim)
 
 
-def collate_graph_samples(graph_samples: List[ContinuousTimeGraphSample]):
+def collate_graph_samples(graph_samples: list[ContinuousTimeGraphSample]):
     for sample in graph_samples:
-        sample.unsqueeze()
+        if len(sample.node_features.shape) == 1:
+            sample.unsqueeze()
     batch_graph: dict = {
         "node_features": [],
-        "key_padding_mask": [],
         "time": [],
         "target": {
             "features": [],
             "time": [],
         },
     }
+    if graph_samples[0].key_padding_mask is not None:
+        batch_graph["key_padding_mask"] = []
     if graph_samples[0].type_index is not None:
         batch_graph["type_index"] = []
     if graph_samples[0].attention_mask is not None:
@@ -285,8 +336,6 @@ def test_data_classes():
     target = {
         "features": [10],
         "time": [0.1],
-        "type_index": [10],
-        "spatial_index": [10],
         "dummy": 20,
     }
     graph = {

@@ -57,36 +57,23 @@ class FrequencyScale(nn.Module):
 
 
 class Time2Vec(nn.Module):
-    """
-    Time2Vec layer from the paper "Time2Vec: Learning a Vector Representation of Time"
-    """
-    def __init__(self, embedding_dim: int, include_linear: bool = True, frequency_scaling: float = torch.pi*2.0):
+    def __init__(self, embedding_dim: int):
         super().__init__()
         self.embedding_dim = embedding_dim
-        self.scale = FrequencyScale(embedding_dim, include_linear, frequency_scaling)
-        self.include_linear = include_linear
-        self.frequency_scaling = frequency_scaling
+        self.linear = nn.Linear(1, embedding_dim)
 
     def forward(self, tau: Tensor) -> Tensor:
-        if len(tau.shape) == 1:
-            tau = tau.unsqueeze(-1)
-        time_scaling = self.scale(tau)
+        time_scaling = self.linear(tau)
         if len(tau.shape) == 2:
-            if not self.include_linear:
-                time_embedding = torch.sin(time_scaling)
-            else:
-                periodic_embedding = torch.sin(time_scaling[:, 1:])
-                time_embedding = torch.cat(
-                    (time_scaling[:, 0:1], periodic_embedding), dim=1
-                )
+            periodic_embedding = torch.sin(time_scaling[:, 1:])
+            time_embedding = torch.cat(
+                (time_scaling[:, 0:1], periodic_embedding), dim=1
+            )
         else:
-            if not self.include_linear:
-                time_embedding = torch.sin(time_scaling)
-            else:
-                periodic_embedding = torch.sin(time_scaling[:, :, 1:])
-                time_embedding = torch.cat(
-                    (time_scaling[:, :, 0:1], periodic_embedding), dim=2
-                )
+            periodic_embedding = torch.sin(time_scaling[:, :, 1:])
+            time_embedding = torch.cat(
+                (time_scaling[:, :, 0:1], periodic_embedding), dim=2
+            )
         return time_embedding
 
 

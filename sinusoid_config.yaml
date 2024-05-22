@@ -1,0 +1,26 @@
+data_params:
+  num_workers: 7
+  batch_size: 50
+  train_split: 0.8
+  generation_params:
+    context_length: 100
+    t_end: 500
+    fs: 1000
+    f: 10
+    sparsity: 0.98
+logging_params:
+  name: AGG_Graph_v0.1_sinusoid
+model_params:
+  attention_drop: 0.1
+  dropout: 0.0
+  input_dim: 1
+  num_heads: 2
+  feature_dim: 32
+  time_embedding_dim: 4
+  output_dim: 1
+  type: Graph
+optimiser_params:
+  lr: 0.001
+  max_lr: 0.002
+  min_lr: 0.001
+  total_iters: 200
