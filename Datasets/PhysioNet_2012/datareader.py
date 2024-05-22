@@ -1067,7 +1067,7 @@ class ICUData(GraphDataset):
         normal: bool = True,
         force_preprocessing: bool = False,
         classification: bool = False,
-        k_fold: int = 5,
+        k_fold: int | None = 5,
         test_fraction: float = 0.2,
         k_fold_index: Optional[int] = None,
     ):

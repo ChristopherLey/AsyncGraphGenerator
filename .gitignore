@@ -20,3 +20,5 @@ qc
  q/archived_logs/
 /lightning_logs/
 /archived_logs/
+/Datasets/Beijing/data/raw/pm2_5_data_10.pkl
+/Datasets/GRIN_Data/

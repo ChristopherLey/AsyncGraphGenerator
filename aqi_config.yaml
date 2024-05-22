@@ -1,0 +1,41 @@
+data_params:
+  batch_size: 5
+  block_size: 6
+  block_steps_percent: 0.75
+  db_config: Datasets/GRIN_Data/mongo_config.yaml
+  dataset: 'aqi'
+  num_workers: 7
+  sparsity: 0.05
+  subset: 0.2
+  include_topography: true
+logging_params:
+  name: AGG_GAT
+model_params:
+  input_dim: 1
+  feature_dim: 8
+  num_heads: 4
+  time_embedding_dim: 8
+  num_node_types: 0
+  type_embedding_dim: 0
+  spatial_embedding_dim: 8
+  num_spatial_components: -1
+  spatial_input: 2
+  num_categories: 0
+  categorical_embedding_dim: 0
+  num_layers: 2
+  attention_drop: 0.2
+  dropout: 0.2
+  combined_features: true
+  query_includes_categorical: false
+  categorical_input: false
+  query_includes_type: false
+  type: GNN
+optimiser_params:
+  lr: 0.001
+  start_factor: 1.0
+  end_factor: 0.1
+  total_iters: 200
+trainer_params:
+  precision: "16-mixed"
+  gradient_clip_val: 1.0
+  accumulate_grad_batches: 10

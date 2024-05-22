@@ -22,6 +22,7 @@ from pydantic import ValidationInfo
 from torch import BoolTensor
 from torch import FloatTensor
 from torch import LongTensor
+import numpy as np
 
 
 def cast_2_float_tensor(v: list | FloatTensor, info: ValidationInfo, **kwargs):
@@ -50,6 +51,8 @@ def cast_2_long_tensor(v: list | LongTensor, info: ValidationInfo, **kwargs):
         entry = v
     elif isinstance(v, int):
         entry = torch.tensor([v], dtype=torch.long)
+    elif isinstance(v, list) and len(v) == 0:
+        return None
     else:
         entry = torch.tensor(v, dtype=torch.long)
     if (
@@ -61,7 +64,7 @@ def cast_2_long_tensor(v: list | LongTensor, info: ValidationInfo, **kwargs):
         )
     elif "features" in info.data and entry.shape[0] != info.data["features"].shape[0]:
         raise ValueError(
-            f"{info.field_name} shape: {entry.shape} != features.shape {info.data['node_features'].shape}"
+            f"{info.field_name} shape: {entry.shape} != features.shape {info.data['features'].shape}"
         )
     return entry
 
@@ -70,7 +73,7 @@ class TargetNode(BaseModel):
     features: LongTensor | FloatTensor
     type_index: LongTensor | None = None
     time: FloatTensor
-    spatial_index: LongTensor | None = None
+    spatial_index: LongTensor | FloatTensor | None = None
     category_index: LongTensor | FloatTensor | None = None
 
     _cast_type_index: classmethod = field_validator("type_index", mode="before")(
@@ -78,9 +81,6 @@ class TargetNode(BaseModel):
     )
     _cast_time: classmethod = field_validator("time", mode="before")(
         cast_2_float_tensor
-    )
-    _cast_spatial_index: classmethod = field_validator("spatial_index", mode="before")(
-        cast_2_long_tensor
     )
 
     @field_validator("features", mode="before")
@@ -109,6 +109,29 @@ class TargetNode(BaseModel):
             entry = v
         elif isinstance(v, FloatTensor):
             entry = v
+        elif isinstance(v, list) and len(v) == 0:
+            return None
+        else:
+            if isinstance(v[0], int):
+                entry = torch.tensor(v, dtype=torch.long)
+            else:
+                entry = torch.tensor(v, dtype=torch.float)
+                entry = torch.nan_to_num(entry)
+        return entry
+
+    @field_validator("spatial_index", mode="before")
+    @classmethod
+    def create_spatial_index(
+            cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
+    ):
+        if isinstance(v, LongTensor):
+            entry = v
+        elif isinstance(v, FloatTensor):
+            entry = v
+        elif isinstance(v, np.ndarray):
+            entry = torch.tensor(v, dtype=torch.float)
+        elif isinstance(v, list) and len(v) == 0:
+            return None
         else:
             if isinstance(v[0], int):
                 entry = torch.tensor(v, dtype=torch.long)
@@ -137,7 +160,7 @@ class ContinuousTimeGraphSample(BaseModel):
     attention_mask: BoolTensor
     target: TargetNode
     type_index: LongTensor | None = None
-    spatial_index: LongTensor | None = None
+    spatial_index: LongTensor | FloatTensor | None = None
     category_index: LongTensor | FloatTensor | None = None
 
     _cast_node_features: classmethod = field_validator("node_features", mode="before")(
@@ -150,9 +173,6 @@ class ContinuousTimeGraphSample(BaseModel):
     _cast_type_index: classmethod = field_validator("type_index", mode="before")(
         cast_2_long_tensor
     )
-    _cast_spatial_index: classmethod = field_validator("spatial_index", mode="before")(
-        cast_2_long_tensor
-    )
 
     @field_validator("category_index", mode="before")
     @classmethod
@@ -163,6 +183,8 @@ class ContinuousTimeGraphSample(BaseModel):
             entry = v
         elif isinstance(v, FloatTensor):
             entry = v
+        elif isinstance(v, list) and len(v) == 0:
+            return None
         else:
             if isinstance(v[0], int):
                 entry = torch.tensor(v, dtype=torch.long)
@@ -216,6 +238,27 @@ class ContinuousTimeGraphSample(BaseModel):
                 f"{info.field_name} shape: {entry.shape} != "
                 f"[{info.data['time'].shape[-1]}, {info.data['time'].shape[-1]}]"
             )
+        return entry
+
+    @field_validator("spatial_index", mode="before")
+    @classmethod
+    def create_spatial_index(
+            cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
+    ):
+        if isinstance(v, LongTensor):
+            entry = v
+        elif isinstance(v, FloatTensor):
+            entry = v
+        elif isinstance(v, np.ndarray):
+            entry = torch.tensor(v, dtype=torch.float)
+        elif isinstance(v, list) and len(v) == 0:
+            return None
+        else:
+            if isinstance(v[0], int):
+                entry = torch.tensor(v, dtype=torch.long)
+            else:
+                entry = torch.tensor(v, dtype=torch.float)
+                entry = torch.nan_to_num(entry)
         return entry
 
     class Config:
@@ -293,8 +336,6 @@ def test_data_classes():
     target = {
         "features": [10],
         "time": [0.1],
-        "type_index": [10],
-        "spatial_index": [10],
         "dummy": 20,
     }
     graph = {

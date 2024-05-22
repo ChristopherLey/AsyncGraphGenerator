@@ -39,8 +39,10 @@ class SelfAttentionBlock(nn.Module):
         batch_first: bool = True,
         hidden_dim: Optional[int] = None,
         output_dim: Optional[int] = None,
+        use_mask: bool = True,
     ):
         super().__init__()
+        self.use_mask = use_mask
         self.norm1 = nn.LayerNorm(embed_dim)  # node normalisation
         self.self_attention = nn.MultiheadAttention(
             embed_dim=embed_dim,
@@ -69,19 +71,22 @@ class SelfAttentionBlock(nn.Module):
         attention_mask: Tensor,
         key_padding_mask: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor]:
-        if len(attention_mask.shape) == 3:
-            B, N, _ = attention_mask.shape
-            multihead_mask = (
-                attention_mask.unsqueeze(0)
-                .repeat(self.num_heads, 1, 1, 1)
-                .transpose(1, 0)
-                .reshape(-1, N, N)
+        if self.use_mask:
+            if len(attention_mask.shape) == 3:
+                B, N, _ = attention_mask.shape
+                multihead_mask = (
+                    attention_mask.unsqueeze(0)
+                    .repeat(self.num_heads, 1, 1, 1)
+                    .transpose(1, 0)
+                    .reshape(-1, N, N)
+                )
+            else:
+                multihead_mask = attention_mask
+            attention, attention_weights = self.self_attention(
+                x, x, x, attn_mask=multihead_mask, key_padding_mask=key_padding_mask
             )
         else:
-            multihead_mask = attention_mask
-        attention, attention_weights = self.self_attention(
-            x, x, x, attn_mask=multihead_mask, key_padding_mask=key_padding_mask
-        )
+            attention, attention_weights = self.self_attention(x, x, x)
         attention = torch.nan_to_num(attention)
         attention_weights = torch.nan_to_num(attention_weights)
         x = x + attention
@@ -90,7 +95,7 @@ class SelfAttentionBlock(nn.Module):
         return self.norm2(x), attention_weights
 
 
-class CrossAttentionBlock(nn.Module):
+class ConditionalAttentionBlock(nn.Module):
     def __init__(
         self,
         target_dim: int,
@@ -127,13 +132,13 @@ class CrossAttentionBlock(nn.Module):
         self, target: Tensor, source: Tensor, key_padding_mask: Optional[Tensor] = None
     ) -> Tuple[Tensor, Tensor]:
         key = self.norm1_source(source)
-        mask = (torch.ones((target.shape[-2], source.shape[-2])) == 0).to(key.device)
+        # mask = (torch.ones((target.shape[-2], source.shape[-2])) == 0).to(key.device)
         attention, attention_weights = self.cross_attention(
             query=self.norm1_target(target),
             key=key,
             value=key,
-            attn_mask=mask,
-            key_padding_mask=key_padding_mask,
+            # attn_mask=mask,
+            # key_padding_mask=key_padding_mask,
         )
         attention = torch.nan_to_num(attention)
         attention_weights = torch.nan_to_num(attention_weights)
@@ -174,8 +179,10 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
         categorical_input: Optional[int] = None,
         query_includes_type: bool = True,
         transfer_learning: bool = False,
+        use_mask: bool = True,
     ):
         super().__init__()
+        self.use_mask = use_mask
         self.node_feature_dim = (
             feature_dim
             + time_embedding_dim
@@ -232,9 +239,11 @@ class AsynchronousGraphGeneratorTransformer(nn.Module):
                     num_heads=num_heads,
                     dropout=attention_drop,
                     batch_first=True,
+                    use_mask=self.use_mask,
+
                 )
             )
-        self.cross_attention = CrossAttentionBlock(
+        self.cross_attention = ConditionalAttentionBlock(
             target_dim=self.query_dim,
             source_dim=self.node_feature_dim,
             num_heads=num_heads,

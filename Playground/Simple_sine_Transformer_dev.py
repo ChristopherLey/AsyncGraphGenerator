@@ -15,7 +15,7 @@ from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.graph_dataset import GraphDataset
 from AGG.utils import FeedForward
 from AGG.utils import Time2Vec
-from AGG.transformer_model import SelfAttentionBlock, CrossAttentionBlock
+from AGG.transformer_model import SelfAttentionBlock, ConditionalAttentionBlock
 from torch.utils.data import DataLoader
 from AGG.extended_typing import collate_graph_samples
 from Datasets.data_tools import random_index
@@ -54,7 +54,7 @@ class AGG(nn.Module):
                     batch_first=True,
                 )
             )
-        self.cross_attention = CrossAttentionBlock(
+        self.cross_attention = ConditionalAttentionBlock(
             target_dim=self.query_dim,
             source_dim=self.node_feature_dim,
             num_heads=num_heads,

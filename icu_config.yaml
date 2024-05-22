@@ -1,6 +1,6 @@
 data_params:
   block_size: 100
-  sparsity: 0.7
+  sparsity: 0.1
   db_config: "Datasets/PhysioNet_2012/data/mongo_config.yaml"
   batch_size: 3000
   num_workers: 7
