@@ -1,11 +1,33 @@
-import torch
-from torchmetrics import Metric
-from torch import Tensor, tensor
-from typing import Any, Optional, Sequence, Union
+"""
+    Copyright (C) 2023, Christopher Paul Ley
+    Asynchronous Graph Generator
 
-from torchmetrics.functional.regression.mae import _mean_absolute_error_compute, _mean_absolute_error_update
-from torchmetrics.utilities.imports import _MATPLOTLIB_AVAILABLE
-from torchmetrics.utilities.plot import _AX_TYPE, _PLOT_OUT_TYPE
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+from typing import Any
+from typing import Optional
+from typing import Sequence
+from typing import Union
+
+import torch
+from torch import Tensor
+from torch import tensor
+from torchmetrics import Metric
+from torchmetrics.functional.regression.mae import _mean_absolute_error_compute
+from torchmetrics.functional.regression.mae import _mean_absolute_error_update
+from torchmetrics.utilities.plot import _AX_TYPE
+from torchmetrics.utilities.plot import _PLOT_OUT_TYPE
 
 
 class MeanRelativeError(Metric):
@@ -36,8 +58,8 @@ class MeanRelativeError(Metric):
     sum_abs_targets: Tensor
 
     def __init__(
-            self,
-            **kwargs: Any,
+        self,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
 
@@ -46,7 +68,9 @@ class MeanRelativeError(Metric):
 
     def update(self, preds: Tensor, target: Tensor) -> None:
         sum_abs_error, _ = _mean_absolute_error_update(preds, target)
-        sum_abs_target, _ = _mean_absolute_error_update(torch.zeros_like(target), target)
+        sum_abs_target, _ = _mean_absolute_error_update(
+            torch.zeros_like(target), target
+        )
 
         self.sum_abs_error += sum_abs_error
         self.sum_abs_targets += sum_abs_target
@@ -56,7 +80,9 @@ class MeanRelativeError(Metric):
         return _mean_absolute_error_compute(self.sum_abs_error, self.sum_abs_targets)
 
     def plot(
-            self, val: Optional[Union[Tensor, Sequence[Tensor]]] = None, ax: Optional[_AX_TYPE] = None
+        self,
+        val: Optional[Union[Tensor, Sequence[Tensor]]] = None,
+        ax: Optional[_AX_TYPE] = None,
     ) -> _PLOT_OUT_TYPE:
         """Plot a single or multiple values from the metric.
 

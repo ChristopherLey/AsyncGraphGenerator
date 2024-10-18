@@ -15,27 +15,19 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-import io
 from copy import deepcopy
-from pathlib import Path
 from typing import Tuple
 
 import matplotlib
-import matplotlib.pyplot as plt
 import pytorch_lightning as pl
-import seaborn as sns
 import torch
-from PIL import Image
 from torch import nn
 from torch.optim import Adam
 from torchmetrics import MeanAbsoluteError
 from torchmetrics import MeanSquaredError
-from torchvision import transforms
 
 from AGG.extended_typing import ContinuousTimeGraphSample
-from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
-from AGG.graph_model import AsynchronousGraphGenerator
-from AGG.utils import fig2img
+from AGG.model import AsynchronousGraphGenerator
 
 matplotlib.use("Agg")
 
@@ -153,7 +145,7 @@ class ATGDoublePendulumExperiment(pl.LightningModule):
         self.model_params = deepcopy(model_params)
         if "type" in self.model_params:
             self.model_params.pop("type")
-        self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
+        self.agg = AsynchronousGraphGenerator(**self.model_params)
         self.logging_params = logging_params
         self.optimiser_params = optimiser_params
         self.data_params = data_params

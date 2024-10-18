@@ -31,7 +31,8 @@ from torch.utils.data import DataLoader
 
 from AGG.extended_typing import collate_graph_samples
 from Datasets.DoublePendulum.datareader import DoublePendulumDataset
-from Datasets.DoublePendulum.experiment import ATGDoublePendulumExperiment, AGGDoublePendulumExperiment
+from Datasets.DoublePendulum.experiment import AGGDoublePendulumExperiment
+from Datasets.DoublePendulum.experiment import ATGDoublePendulumExperiment
 
 
 def main():
@@ -88,7 +89,7 @@ def main():
         train_length = len(train_reader)
         subset = floor(train_length * config["data_params"]["subset"])
         print(f"Training with a subset of {subset}/{train_length}")
-        print(f'Total train dataset length: {train_length}')
+        print(f"Total train dataset length: {train_length}")
         shuffle = True
     else:
         subset = None
@@ -158,9 +159,7 @@ def main():
 
     callbacks = [mse_callback, mae_callback]
     now = f"{datetime.now().strftime('%d-%m_%H-%M-%S')}"
-    version_path = (
-        f"AGG-double_pendulum-{now}"
-    )
+    version_path = f"AGG-double_pendulum-{now}"
 
     wandb_logger = pl_loggers.WandbLogger(
         save_dir=".",

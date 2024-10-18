@@ -96,22 +96,22 @@ def main():
         train_length = len(train_reader)
         subset = floor(train_length * config["data_params"]["subset"])
         print(f"Training with a subset of {subset}/{train_length}")
-        print(f'Total train dataset length: {train_length}')
+        print(f"Total train dataset length: {train_length}")
         shuffle = True
     else:
         subset = None
         shuffle = False
     train_reader = AQIInterpolationDataset(
-            block_size=config["data_params"]["block_size"],
-            sparsity=config["data_params"]["sparsity"],
-            block_steps_percent=config["data_params"]["block_steps_percent"],
-            db_config=Path(config["data_params"]["db_config"]),
-            dataset=config["data_params"]["dataset"],
-            version="train",
-            subset=subset,
-            shuffle=shuffle,
-            include_topography=include_topography,
-        )
+        block_size=config["data_params"]["block_size"],
+        sparsity=config["data_params"]["sparsity"],
+        block_steps_percent=config["data_params"]["block_steps_percent"],
+        db_config=Path(config["data_params"]["db_config"]),
+        dataset=config["data_params"]["dataset"],
+        version="train",
+        subset=subset,
+        shuffle=shuffle,
+        include_topography=include_topography,
+    )
     train_dataloader = DataLoader(
         train_reader,
         shuffle=False,
@@ -141,8 +141,10 @@ def main():
     )
 
     if "num_spatial_components" not in config["model_params"]:
-        config["model_params"]["num_spatial_components"] = len(train_reader.config["stations"])
-    config['logging_params']['scaling'] = train_reader.config['preprocessing']
+        config["model_params"]["num_spatial_components"] = len(
+            train_reader.config["stations"]
+        )
+    config["logging_params"]["scaling"] = train_reader.config["preprocessing"]
 
     model = AGGExperimentAQIInterpolation(
         model_params=config["model_params"],

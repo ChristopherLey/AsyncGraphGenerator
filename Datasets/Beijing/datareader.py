@@ -17,17 +17,18 @@
 """
 import copy
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
 from pathlib import Path
 from random import randint
 from typing import Any
 from typing import Dict
 from typing import Optional
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 import torch
 import yaml
+from dateutil.relativedelta import relativedelta
 from pymongo import MongoClient
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import Dataset
@@ -251,9 +252,7 @@ def normalise(feature, scaling):
     return (feature - scaling["mean"]) / scaling["std"]
 
 
-def create_indexes(
-    config: dict, sparsity: float,
-) -> (dict, list, list):
+def create_indexes(config: dict, sparsity: float) -> Tuple[dict, list, list]:
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
     db_raw = db["raw"]
@@ -291,70 +290,97 @@ def create_pm25_indexes(config: dict, sparsity: float = 0.13) -> dict[str, list]
     assert db_raw.estimated_document_count() > 0
     train_data = []
     for mask in training_masks:
-        input_other = (
-            list(db_raw.find({
-                "time": {"$gte": mask[0], "$lte": mask[1]},
-                "type_index": {"$ne": 0},
-            }).sort("time"))
+        input_other = list(
+            db_raw.find(
+                {
+                    "time": {"$gte": mask[0], "$lte": mask[1]},
+                    "type_index": {"$ne": 0},
+                }
+            ).sort("time")
         )
 
-        train_pm25 = list(db_raw.find({
-            "time": {"$gte": mask[0], "$lte": mask[1]},
-            "type_index": 0,
-        }).sort("time"))
+        train_pm25 = list(
+            db_raw.find(
+                {
+                    "time": {"$gte": mask[0], "$lte": mask[1]},
+                    "type_index": 0,
+                }
+            ).sort("time")
+        )
         removed, remainder = random_index(len(train_pm25), sparsity)
-        train_data.append({
-            "removed_indexes": removed.tolist(),
-            "remainder_indexes": remainder.tolist(),
-            'pm25': train_pm25,
-            "input": input_other
-        })
+        train_data.append(
+            {
+                "removed_indexes": removed.tolist(),
+                "remainder_indexes": remainder.tolist(),
+                "pm25": train_pm25,
+                "input": input_other,
+            }
+        )
 
     test_indexes = []
     for mask in tqdm(test_masks):
         pm25_test_samples = []
         pm25_test_targets = []
-        input_other = list(db_raw.find({
-                "time": {"$gt": mask[0], "$lt": mask[1]},
-                "type_index": {"$ne": 0},
-            }).sort("time"))
-        all_pm25_in_test = list(db_raw.find({
-                "time": {"$gt": mask[0], "$lt": mask[1]},
-                "type_index": 0,
-            }).sort("time"))
-        previous_month_pm25 = list(db_raw.find({
-            "time": {"$gt": mask[0] - relativedelta(months=1), "$lt": mask[1] - relativedelta(months=1)},
-            "type_index": 0,
-        }).sort("time"))
+        input_other = list(
+            db_raw.find(
+                {
+                    "time": {"$gt": mask[0], "$lt": mask[1]},
+                    "type_index": {"$ne": 0},
+                }
+            ).sort("time")
+        )
+        all_pm25_in_test = list(
+            db_raw.find(
+                {
+                    "time": {"$gt": mask[0], "$lt": mask[1]},
+                    "type_index": 0,
+                }
+            ).sort("time")
+        )
+        previous_month_pm25 = list(
+            db_raw.find(
+                {
+                    "time": {
+                        "$gt": mask[0] - relativedelta(months=1),
+                        "$lt": mask[1] - relativedelta(months=1),
+                    },
+                    "type_index": 0,
+                }
+            ).sort("time")
+        )
         for sample in tqdm(all_pm25_in_test):
             used = False
             for compare in previous_month_pm25:
-                if (sample['time'] - relativedelta(months=1)) == compare["time"] and sample["spatial_index"] == compare["spatial_index"]:
+                if (sample["time"] - relativedelta(months=1)) == compare[
+                    "time"
+                ] and sample["spatial_index"] == compare["spatial_index"]:
                     pm25_test_samples.append(sample)
                     used = True
                     break
-                elif compare["time"] > (sample['time'] - relativedelta(months=1)):
+                elif compare["time"] > (sample["time"] - relativedelta(months=1)):
                     pm25_test_targets.append(sample)
                     used = True
                     break
             if not used:
                 pm25_test_targets.append(sample)
-        test_indexes.append({
-            "removed_pm25_data": pm25_test_targets,
-            "remainder_pm25_data": pm25_test_samples,
-            "input": input_other
-        })
+        test_indexes.append(
+            {
+                "removed_pm25_data": pm25_test_targets,
+                "remainder_pm25_data": pm25_test_samples,
+                "input": input_other,
+            }
+        )
 
     datasets = {"train": train_data, "test": test_indexes}
     return datasets
 
 
 def create_data_block_with_data(
-        input_data: list,
-        target_data: list,
-        time_scale: float,
-        params,
-        sample_count: int,
+    input_data: list,
+    target_data: list,
+    time_scale: float,
+    params,
+    sample_count: int,
 ):
     write_data = []
     max_time = input_data[-1]["time"]
@@ -474,7 +500,7 @@ def create_seq_data_batch(
     time_scale: float,
     params,
     sample_count: int,
-    prediction_steps: int = 24*15,
+    prediction_steps: int = 24 * 15,
 ):
     write_data = []
     input_index = np.arange(n, (n + block_size))
@@ -497,9 +523,7 @@ def create_seq_data_batch(
                 params["scaling"][features[raw_entry["type_index"]]],
             )
         )
-        graph["time"].append(
-            raw_entry["time"]
-        )
+        graph["time"].append(raw_entry["time"])
         index_datetime.append(raw_entry["time"])
         graph["category_index"].append(raw_entry["category_index"])
         graph["type_index"].append(raw_entry["type_index"])
@@ -528,7 +552,9 @@ def create_seq_data_batch(
         graph_sample["target"] = target
         graph_sample["idx"] = sample_count
         for i in range(len(graph_sample["time"])):
-            graph_sample["time"][i] = (max_time - graph_sample["time"][i]).total_seconds() / time_scale
+            graph_sample["time"][i] = (
+                max_time - graph_sample["time"][i]
+            ).total_seconds() / time_scale
         sample_count += 1
         write_data.append(graph_sample)
     return write_data, sample_count, index_datetime, prediction_datetime
@@ -544,6 +570,7 @@ def create_interpolation_dataset(
     strict_pm25: bool = False,
 ):
     import pickle
+
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
     db_params = db["param"]
@@ -552,7 +579,9 @@ def create_interpolation_dataset(
     assert db_raw.estimated_document_count() > 0
     params = db_params.find_one({})
     if strict_pm25:
-        block_name = f"block_pm25_{block_size:02d}_{100 * sparsity}%_steps_{block_steps}"
+        block_name = (
+            f"block_pm25_{block_size:02d}_{100 * sparsity}%_steps_{block_steps}"
+        )
     else:
         block_name = f"block_{block_size:02d}_{100 * sparsity}%_steps_{block_steps}"
     block_db = db[block_name]
@@ -580,8 +609,8 @@ def create_interpolation_dataset(
             print(f"Loading {raw_path=}")
             with open(raw_path, "rb") as f:
                 datasets = pickle.load(f)
-        training = datasets['train']
-        testing = datasets['test']
+        training = datasets["train"]
+        testing = datasets["test"]
         test_sample_count = 0
         train_sample_count = 0
 
@@ -591,17 +620,19 @@ def create_interpolation_dataset(
             pm25_train_input_data = []
             pm25_train_target_data = []
             # mix pm25 data with other data
-            for index in trange(len(training[i]['pm25'])):
-                if index in data['removed_indexes']:
-                    pm25_train_target_data.append(training[i]['pm25'][index])
+            for index in trange(len(training[i]["pm25"])):
+                if index in data["removed_indexes"]:
+                    pm25_train_target_data.append(training[i]["pm25"][index])
                 else:
-                    pm25_train_input_data.append(training[i]['pm25'][index])
+                    pm25_train_input_data.append(training[i]["pm25"][index])
             # combine and sort by time
-            input_data = sorted(pm25_train_input_data + data['input'], key=lambda x: x['time'])
-            target_data = sorted(pm25_train_target_data, key=lambda x: x['time'])
+            input_data = sorted(
+                pm25_train_input_data + data["input"], key=lambda x: x["time"]
+            )
+            target_data = sorted(pm25_train_target_data, key=lambda x: x["time"])
             for n in trange(0, len(input_data) - block_size, block_steps):
                 write_data, train_sample_count = create_data_block_with_data(
-                    input_data[n:(n + block_size)],
+                    input_data[n : (n + block_size)],
                     target_data,
                     time_scale,
                     params,
@@ -613,11 +644,13 @@ def create_interpolation_dataset(
         for i in trange(len(testing)):
             data = testing[i]
             # combine and sort by time
-            input_data = sorted(data['remainder_pm25_data'] + data['input'], key=lambda x: x['time'])
-            target_data = sorted(data['removed_pm25_data'], key=lambda x: x['time'])
+            input_data = sorted(
+                data["remainder_pm25_data"] + data["input"], key=lambda x: x["time"]
+            )
+            target_data = sorted(data["removed_pm25_data"], key=lambda x: x["time"])
             for n in trange(0, len(input_data) - block_size, block_steps):
                 write_data, test_sample_count = create_data_block_with_data(
-                    input_data[n:(n + block_size)],
+                    input_data[n : (n + block_size)],
                     target_data,
                     time_scale,
                     params,
@@ -1013,7 +1046,12 @@ if __name__ == "__main__":
         config: dict = yaml.safe_load(f)
         config["data_root"] = "data/raw"
     create_interpolation_dataset(
-        config, block_size=1500, sparsity=0.10, block_steps=150, exists_ok=False, strict_pm25=True
+        config,
+        block_size=1500,
+        sparsity=0.10,
+        block_steps=150,
+        exists_ok=False,
+        strict_pm25=True,
     )
     # reader = KDDInterpolationDataset(
     #     1500,

@@ -4,7 +4,6 @@ __pycache__*
 */__pycache__/*
 /TGL/
 .ipynb_checkpoints*
-/Datasets/PhysioNet_2012/
 /Datasets/OU_Gait/
 /Datasets/nntimeseries/
 /Datasets/CMPC/
@@ -13,7 +12,6 @@ __pycache__*
 /References/*
 /lightning_logs/*/hparams.yaml
 lightning_logs/*/events.*
-/Datasets/nntimeseries/
 /Playground/logs/
 qc
 
@@ -22,3 +20,14 @@ qc
 /archived_logs/
 /Datasets/Beijing/data/raw/pm2_5_data_10.pkl
 /Datasets/GRIN_Data/
+/Playground/
+/Datasets/Beijing/data/raw/
+/Datasets/SparseSinusoid/
+Reviews.ipynb
+sinusoid_config.yaml
+AGG/graph_model.py
+/Datasets/PhysioNet_2012/data/
+!/Datasets/PhysioNet_2012/data/__init__.py
+!/Datasets/PhysioNet_2012/data/mongo_config.yaml
+/Datasets/Localisation/Explore_Localisation.ipynb
+/Datasets/Localisation/Multiagentcaresystem.pdf

@@ -15,24 +15,23 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+import pickle
 from pathlib import Path
 from typing import Dict
 
 import matplotlib.pyplot as plt
-import numpy as np
 import seaborn as sns
 import torch
 import yaml
 from pymongo import MongoClient
+from torchmetrics import MeanSquaredError
 from tqdm import tqdm
 from tqdm import trange
-from torchmetrics import MeanSquaredError
-import pickle
 
 from AGG.extended_typing import collate_graph_samples
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.graph_dataset import GraphDataset
-from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
+from AGG.model import AsynchronousGraphGenerator
 from Datasets.Beijing.datareader import create_seq_data_batch
 from Datasets.Beijing.datareader import test_masks
 from Datasets.Beijing.datareader import unique_stations
@@ -77,27 +76,34 @@ else:
             .find({"time": {"$gte": date_range[0], "$lte": date_range[1]}})
             .sort("time")
         )
-        for n in trange(0, len(raw_data) - block_size - 24*15, block_size//2):
-            write_data, sample_count, index_datetime, prediction_datetime = create_seq_data_batch(
+        for n in trange(0, len(raw_data) - block_size - 24 * 15, block_size // 2):
+            (
+                write_data,
+                sample_count,
+                index_datetime,
+                prediction_datetime,
+            ) = create_seq_data_batch(
                 raw_data,
                 block_size,
                 n,
                 time_scale,
                 params,
                 sample_count,
-                prediction_steps=45
+                prediction_steps=45,
             )
             if len(write_data) > 0:
-                data_set.append({
-                    "data": write_data,
-                    "index_datetime": index_datetime,
-                    "prediction_datetime": prediction_datetime
-                })
+                data_set.append(
+                    {
+                        "data": write_data,
+                        "index_datetime": index_datetime,
+                        "prediction_datetime": prediction_datetime,
+                    }
+                )
     with open(save_dir, "wb") as f:
         pickle.dump(data_set, f)
 
 config["model_params"].pop("type")
-agg = AsynchronousGraphGeneratorTransformer(**config["model_params"])
+agg = AsynchronousGraphGenerator(**config["model_params"])
 agg.load_state_dict(checkpoint["state_dict"])
 agg.eval()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -112,14 +118,15 @@ def create_batch(data_set: list) -> ContinuousTimeGraphSample:
         batch.append(graph)
     return collate_graph_samples(batch)
 
+
 time_series: Dict[str, dict] = {
     station: {
-        'index_times': [],
-        'prediction_times': [],
-        'index_values': [],
-        'index_types': [],
-        'prediction_values': [],
-        'target_values': []
+        "index_times": [],
+        "prediction_times": [],
+        "index_values": [],
+        "index_types": [],
+        "prediction_values": [],
+        "target_values": [],
     }
     for station in unique_stations
 }
@@ -138,63 +145,132 @@ with torch.no_grad():
 
     for prediction_block_idx in trange(len(data_set)):
         prediction_block = data_set[prediction_block_idx]
-        for l in trange(0, len(prediction_block["data"]), batch_size):
-            if l + batch_size > len(prediction_block["data"]):
-                graph = create_batch(prediction_block["data"][l:])
+        for block_len in trange(0, len(prediction_block["data"]), batch_size):
+            if block_len + batch_size > len(prediction_block["data"]):
+                graph = create_batch(prediction_block["data"][block_len:])
             else:
-                graph = create_batch(prediction_block["data"][l:l+batch_size])
+                graph = create_batch(
+                    prediction_block["data"][block_len : block_len + batch_size]
+                )
             y_hat, attention_list = agg(graph, device=device)
             y_hat = y_hat.to("cpu")
             target_feature = graph.target.features
-            max_index_time = max(prediction_block['index_datetime'])
+            max_index_time = max(prediction_block["index_datetime"])
             if prediction_block_idx == 0:
-                lowest_error = torch.sqrt(torch.mean((y_hat - target_feature) ** 2)).item()
-            elif torch.sqrt(torch.mean((y_hat - target_feature) ** 2)).item() < lowest_error:
-                lowest_error = torch.sqrt(torch.mean((y_hat - target_feature) ** 2)).item()
+                lowest_error = torch.sqrt(
+                    torch.mean((y_hat - target_feature) ** 2)
+                ).item()
+            elif (
+                torch.sqrt(torch.mean((y_hat - target_feature) ** 2)).item()
+                < lowest_error
+            ):
+                lowest_error = torch.sqrt(
+                    torch.mean((y_hat - target_feature) ** 2)
+                ).item()
                 lowest_index = prediction_block_idx
-            for n, prediction_time in enumerate(prediction_block['prediction_datetime'][l:l+batch_size]):
-                time_index = int((prediction_time - max_index_time).total_seconds()/3600)
-                rmse_metrics[time_index](y_hat[n:n+1, 0], target_feature[n:n+1, 0])
+            for n, prediction_time in enumerate(
+                prediction_block["prediction_datetime"][
+                    block_len : block_len + batch_size
+                ]
+            ):
+                time_index = int(
+                    (prediction_time - max_index_time).total_seconds() / 3600
+                )
+                rmse_metrics[time_index](
+                    y_hat[n : n + 1, 0], target_feature[n : n + 1, 0]
+                )
                 rmse_count[time_index] += 1
             if prediction_block_idx == plot_this_one:
-                for m, feature in enumerate(prediction_block['data'][l:l+batch_size]):
-                    station = prediction_block['data'][m+l]['target']['spatial_index'][0]
-                    time_series[unique_stations[station]]['prediction_times'].append(prediction_block['prediction_datetime'][m+l])
-                    time_series[unique_stations[station]]['prediction_values'].append(y_hat[m, 0].item())
-                    time_series[unique_stations[station]]['target_values'].append(target_feature[m, 0].item())
+                for m, feature in enumerate(
+                    prediction_block["data"][block_len : block_len + batch_size]
+                ):
+                    station = prediction_block["data"][m + block_len]["target"][
+                        "spatial_index"
+                    ][0]
+                    time_series[unique_stations[station]]["prediction_times"].append(
+                        prediction_block["prediction_datetime"][m + block_len]
+                    )
+                    time_series[unique_stations[station]]["prediction_values"].append(
+                        y_hat[m, 0].item()
+                    )
+                    time_series[unique_stations[station]]["target_values"].append(
+                        target_feature[m, 0].item()
+                    )
         if prediction_block_idx == plot_this_one:
-            for m, feature in enumerate(prediction_block['data'][0]['node_features']):
-                station = prediction_block['data'][0]['spatial_index'][m]
-                index_time = prediction_block['index_datetime'][m]
-                time_series[unique_stations[station]]['index_times'].append(index_time)
-                time_series[unique_stations[station]]['index_values'].append(feature)
-                time_series[unique_stations[station]]['index_types'].append(prediction_block['data'][0]['type_index'][m])
+            for m, feature in enumerate(prediction_block["data"][0]["node_features"]):
+                station = prediction_block["data"][0]["spatial_index"][m]
+                index_time = prediction_block["index_datetime"][m]
+                time_series[unique_stations[station]]["index_times"].append(index_time)
+                time_series[unique_stations[station]]["index_values"].append(feature)
+                time_series[unique_stations[station]]["index_types"].append(
+                    prediction_block["data"][0]["type_index"][m]
+                )
     for n, rmse_metric in enumerate(rmse_metrics):
         if rmse_count[n] == 0:
             continue
-        print(f"RMSE for {n} hours: {rmse_metric.compute().item()}, with {rmse_count[n]} samples")
+        print(
+            f"RMSE for {n} hours: {rmse_metric.compute().item()}, with {rmse_count[n]} samples"
+        )
         results.append(rmse_metric.compute().item())
     print(f"Lowest error: {lowest_error} at index {lowest_index}")
 del rmse_metrics
-colours = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan', 'black', 'lime']
+colours = [
+    "tab:blue",
+    "tab:orange",
+    "tab:green",
+    "tab:red",
+    "tab:purple",
+    "tab:brown",
+    "tab:pink",
+    "tab:gray",
+    "tab:olive",
+    "tab:cyan",
+    "black",
+    "lime",
+]
 for station in time_series:
     plt.figure(figsize=(20, 10), dpi=300)
     plot_set = set()
-    for i in range(len(time_series[station]['index_times'])):
-        type = time_series[station]['index_types'][i]
+    for i in range(len(time_series[station]["index_times"])):
+        type = time_series[station]["index_types"][i]
         c = colours[type]
         if type in plot_set:
-            plt.plot(time_series[station]['index_times'][i], time_series[station]['index_values'][i], '.', c=c, markersize=10)
+            plt.plot(
+                time_series[station]["index_times"][i],
+                time_series[station]["index_values"][i],
+                ".",
+                c=c,
+                markersize=10,
+            )
         else:
             plot_set.add(type)
-            plt.plot(time_series[station]['index_times'][i], time_series[station]['index_values'][i], '.', c=c, label=f'Input Channel:{type}', markersize=10)
-    plt.plot(time_series[station]['prediction_times'], time_series[station]['prediction_values'], 's', c=colours[0], label='PM2.5 Prediction', markersize=10)
-    plt.plot(time_series[station]['prediction_times'], time_series[station]['target_values'], '*', c='lime', label='PM2.5 Target', markersize=10)
+            plt.plot(
+                time_series[station]["index_times"][i],
+                time_series[station]["index_values"][i],
+                ".",
+                c=c,
+                label=f"Input Channel:{type}",
+                markersize=10,
+            )
+    plt.plot(
+        time_series[station]["prediction_times"],
+        time_series[station]["prediction_values"],
+        "s",
+        c=colours[0],
+        label="PM2.5 Prediction",
+        markersize=10,
+    )
+    plt.plot(
+        time_series[station]["prediction_times"],
+        time_series[station]["target_values"],
+        "*",
+        c="lime",
+        label="PM2.5 Target",
+        markersize=10,
+    )
     plt.xlabel("Time", fontsize=18)
     plt.ylabel("Feature Value", fontsize=18)
     plt.legend()
     plt.title(f"{station} station PM2.5 prediction", fontsize=20)
     plt.savefig(figure_path / f"prediction_station_{station}.png")
     plt.close()
-
-

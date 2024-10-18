@@ -26,11 +26,18 @@ from torchvision import transforms
 
 
 class FrequencyScale(nn.Module):
-    def __init__(self, embedding_dim: int, include_linear: bool = True, frequency_scaling: float = 2.0 * torch.pi):
+    def __init__(
+        self,
+        embedding_dim: int,
+        include_linear: bool = True,
+        frequency_scaling: float = 2.0 * torch.pi,
+    ):
         super().__init__()
         self.frequency_scaling = frequency_scaling
         self.linear = nn.Linear(1, embedding_dim, bias=False)
-        self.bias = nn.parameter.Parameter(nn.init.uniform_(torch.empty(embedding_dim), -1.0, 1.0))
+        self.bias = nn.parameter.Parameter(
+            nn.init.uniform_(torch.empty(embedding_dim), -1.0, 1.0)
+        )
         self.register_parameter("bias", self.bias)
         self.include_linear = include_linear
         self.weight = self.linear.weight
@@ -46,7 +53,9 @@ class FrequencyScale(nn.Module):
                     (time_scaling[:, 0:1] + self.bias[0:1], pi_scaled), dim=1
                 )
             else:
-                pi_scaled = self.frequency_scaling * time_scaling[:, :, 1:] + self.bias[1:]
+                pi_scaled = (
+                    self.frequency_scaling * time_scaling[:, :, 1:] + self.bias[1:]
+                )
                 time_scaled = torch.cat(
                     (time_scaling[:, :, 0:1] + self.bias[0:1], pi_scaled), dim=2
                 )

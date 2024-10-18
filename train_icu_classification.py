@@ -194,13 +194,17 @@ def main():
 
     callbacks = [mse_callback, AUROC_callback, F1_callback]
     if "test_split" in config["data_params"]:
-        version_path = (f"AGG-icu-class-pre-{pretrained}-"
-                        f"{config['data_params']['test_split']*100:2g}%"
-                        f"-{datetime.now().strftime('%d-%m_%H:%M:%S')}")
+        version_path = (
+            f"AGG-icu-class-pre-{pretrained}-"
+            f"{config['data_params']['test_split']*100:2g}%"
+            f"-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
+        )
     else:
-        version_path = (f"AGG-icu-class-pre-{pretrained}-"
-                        f"{config['data_params']['k_fold']}-fold:{config['data_params']['k_fold_index']}"
-                        f"-{datetime.now().strftime('%d-%m_%H:%M:%S')}")
+        version_path = (
+            f"AGG-icu-class-pre-{pretrained}-"
+            f"{config['data_params']['k_fold']}-fold:{config['data_params']['k_fold_index']}"
+            f"-{datetime.now().strftime('%d-%m_%H:%M:%S')}"
+        )
 
     tb_logger = pl_loggers.TensorBoardLogger(
         save_dir=".",
@@ -212,7 +216,7 @@ def main():
         devices=[0],
         logger=tb_logger,
         callbacks=callbacks,
-        max_epochs=config["optimiser_params"]['max_epochs'],
+        max_epochs=config["optimiser_params"]["max_epochs"],
         log_every_n_steps=1,
         gradient_clip_val=1.0,
     )

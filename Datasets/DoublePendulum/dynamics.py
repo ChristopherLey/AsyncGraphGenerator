@@ -15,15 +15,16 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+from functools import partial
 
 import numpy as np
 from scipy.integrate import solve_ivp
-from functools import partial
+
 
 def double_pendulum_ODE(
-        t: float,
-        y: np.ndarray,
-        dynamics_params: dict = None,
+    t: float,
+    y: np.ndarray,
+    dynamics_params: dict = None,
 ):
     if dynamics_params is None:
         dynamics_params = {
@@ -47,39 +48,64 @@ def double_pendulum_ODE(
     O_2 = y[2]
     O_2d = y[3]
     f[0] = O_1d
-    f[1] = (-O_1d**2*l_1**2*m_2*np.sin(2*O_1 - 2*O_2)/2 - O_1d*k_1 - O_2d**2*l_1*l_2*m_2*np.sin(O_1 - O_2) - g*l_1*m_1*np.sin(O_1) - g*l_1*m_2*np.sin(O_1)/2 - g*l_1*m_2*np.sin(O_1 - 2*O_2)/2)/(l_1**2*(m_1 - m_2*np.cos(O_1 - O_2)**2 + m_2))
+    f[1] = (
+        -(O_1d**2) * l_1**2 * m_2 * np.sin(2 * O_1 - 2 * O_2) / 2
+        - O_1d * k_1
+        - O_2d**2 * l_1 * l_2 * m_2 * np.sin(O_1 - O_2)
+        - g * l_1 * m_1 * np.sin(O_1)
+        - g * l_1 * m_2 * np.sin(O_1) / 2
+        - g * l_1 * m_2 * np.sin(O_1 - 2 * O_2) / 2
+    ) / (l_1**2 * (m_1 - m_2 * np.cos(O_1 - O_2) ** 2 + m_2))
     f[2] = O_2d
-    f[3] = (O_1d**2*l_1**2*m_1*np.sin(O_1 - O_2) + O_1d**2*l_1**2*m_2*np.sin(O_1 - O_2) + O_1d*k_1*np.cos(O_1 - O_2) + O_2d**2*l_1*l_2*m_2*np.sin(2*O_1 - 2*O_2)/2 - g*l_1*m_1*np.sin(O_2)/2 + g*l_1*m_1*np.sin(2*O_1 - O_2)/2 - g*l_1*m_2*np.sin(O_2)/2 + g*l_1*m_2*np.sin(2*O_1 - O_2)/2)/(l_1*l_2*(m_1 - m_2*np.cos(O_1 - O_2)**2 + m_2))
+    f[3] = (
+        O_1d**2 * l_1**2 * m_1 * np.sin(O_1 - O_2)
+        + O_1d**2 * l_1**2 * m_2 * np.sin(O_1 - O_2)
+        + O_1d * k_1 * np.cos(O_1 - O_2)
+        + O_2d**2 * l_1 * l_2 * m_2 * np.sin(2 * O_1 - 2 * O_2) / 2
+        - g * l_1 * m_1 * np.sin(O_2) / 2
+        + g * l_1 * m_1 * np.sin(2 * O_1 - O_2) / 2
+        - g * l_1 * m_2 * np.sin(O_2) / 2
+        + g * l_1 * m_2 * np.sin(2 * O_1 - O_2) / 2
+    ) / (l_1 * l_2 * (m_1 - m_2 * np.cos(O_1 - O_2) ** 2 + m_2))
     return f
 
 
-def double_pendulum_polar_to_cartesian(theta_1: np.ndarray, theta_2: np.ndarray, l_1: float, l_2: float):
-    x_1 = l_1*np.sin(theta_1)
-    y_1 = -l_1*np.cos(theta_1)
-    x_2 = x_1 + l_2*np.sin(theta_2)
-    y_2 = y_1 - l_2*np.cos(theta_2)
+def double_pendulum_polar_to_cartesian(
+    theta_1: np.ndarray, theta_2: np.ndarray, l_1: float, l_2: float
+):
+    x_1 = l_1 * np.sin(theta_1)
+    y_1 = -l_1 * np.cos(theta_1)
+    x_2 = x_1 + l_2 * np.sin(theta_2)
+    y_2 = y_1 - l_2 * np.cos(theta_2)
     return x_1, y_1, x_2, y_2
 
 
 def generate_double_pendulum_data(
-        initial_conditions: np.ndarray,
-        stop_at: int,
-        dynamics_params: dict = None,
-        sampling_rate: float = 1/30,
+    initial_conditions: np.ndarray,
+    stop_at: int,
+    dynamics_params: dict,
+    sampling_rate: float = 1 / 30,
 ):
     parameterised_ODE = partial(double_pendulum_ODE, dynamics_params=dynamics_params)
-    solution = solve_ivp(parameterised_ODE, [0, stop_at*sampling_rate], initial_conditions,
-                         t_eval=np.arange(0, stop_at*sampling_rate, sampling_rate))
+    solution = solve_ivp(
+        parameterised_ODE,
+        [0, stop_at * sampling_rate],
+        initial_conditions,
+        t_eval=np.arange(0, stop_at * sampling_rate, sampling_rate),
+    )
     theta_1, theta_1_dot, theta_2, theta_2_dot = solution.y
-    x_1, y_1, x_2, y_2 = double_pendulum_polar_to_cartesian(theta_1, theta_2, dynamics_params["l_1"], dynamics_params["l_2"])
+    x_1, y_1, x_2, y_2 = double_pendulum_polar_to_cartesian(
+        theta_1, theta_2, dynamics_params["l_1"], dynamics_params["l_2"]
+    )
     return np.stack([x_1, y_1, x_2, y_2], axis=1), solution.t
 
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    initial_conditions = np.array([np.pi/2, 0, np.pi/2, 0])
+
+    initial_conditions = np.array([np.pi / 2, 0, np.pi / 2, 0])
     stop_at = 100
-    sampling_rate = 1/30
+    sampling_rate = 1 / 30
     dyn_params = {
         "l_1": 1,
         "l_2": 1,
@@ -88,7 +114,9 @@ if __name__ == "__main__":
         "k_1": 0.05,
         "g": 9.81,
     }
-    data, time = generate_double_pendulum_data(initial_conditions, stop_at, dyn_params, sampling_rate)
+    data, time = generate_double_pendulum_data(
+        initial_conditions, stop_at, dyn_params, sampling_rate
+    )
     plt.plot(time, data[:, 0], label="x_1")
     plt.plot(time, data[:, 1], label="y_1")
     plt.plot(time, data[:, 2], label="x_2")

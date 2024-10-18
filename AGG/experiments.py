@@ -28,19 +28,18 @@ import torch
 from PIL import Image
 from torch import nn
 from torch.optim import Adam
+from torchmetrics import Accuracy
+from torchmetrics import AUROC
+from torchmetrics import F1Score
 from torchmetrics import MeanAbsoluteError
 from torchmetrics import MeanSquaredError
 from torchmetrics import R2Score
-from torchmetrics import F1Score
-from torchmetrics import Accuracy
-from torchmetrics import AUROC
 from torchvision import transforms
 
 from AGG.extended_typing import ContinuousTimeGraphSample
-from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
-from AGG.graph_model import AsynchronousGraphGenerator
-from AGG.utils import fig2img
 from AGG.metrics import MeanRelativeError
+from AGG.model import AsynchronousGraphGenerator
+from AGG.utils import fig2img
 
 matplotlib.use("Agg")
 
@@ -57,7 +56,7 @@ class AGGExperiment_PM25(pl.LightningModule):
 
         self.model_params = deepcopy(model_params)
         self.model_params.pop("type")
-        self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
+        self.agg = AsynchronousGraphGenerator(**self.model_params)
         self.logging_params = logging_params
         self.optimiser_params = optimiser_params
         self.data_params = data_params
@@ -215,7 +214,7 @@ class AGGExperiment_Activity(pl.LightningModule):
 
         self.model_params = deepcopy(model_params)
         self.model_params.pop("type")
-        self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
+        self.agg = AsynchronousGraphGenerator(**self.model_params)
         self.logging_params = logging_params
         self.optimiser_params = optimiser_params
         self.data_params = data_params
@@ -314,7 +313,7 @@ class AGGExperimentICUInterpolation(pl.LightningModule):
 
         self.model_params = deepcopy(model_params)
         self.model_params.pop("type")
-        self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
+        self.agg = AsynchronousGraphGenerator(**self.model_params)
         self.logging_params = logging_params
         self.optimiser_params = optimiser_params
         self.data_params = data_params
@@ -439,15 +438,15 @@ class AGGExperimentICUClassification(pl.LightningModule):
 
         self.model_params = deepcopy(model_params)
         self.model_params.pop("type")
-        self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
-        if data_params['pretrained_path'] is not None:
-            checkpoint = torch.load(data_params['pretrained_path'])
+        self.agg = AsynchronousGraphGenerator(**self.model_params)
+        if data_params["pretrained_path"] is not None:
+            checkpoint = torch.load(data_params["pretrained_path"])
             self.agg.load_state_dict(checkpoint["state_dict"], strict=False)
-        if data_params['freeze_pretrained']:
+        if data_params["freeze_pretrained"]:
             for name, param in self.agg.named_parameters():
-                if name.startswith('head'):
+                if name.startswith("head"):
                     continue
-                if name.startswith('cross_attention'):
+                if name.startswith("cross_attention"):
                     continue
                 param.requires_grad = False
         self.logging_params = logging_params
@@ -460,8 +459,8 @@ class AGGExperimentICUClassification(pl.LightningModule):
         self.val_AUROC = AUROC(task="binary")
         self.train_Accuracy = Accuracy(task="binary")
         self.val_Accuracy = Accuracy(task="binary")
-        self.train_F1 = F1Score(task='binary')
-        self.val_F1 = F1Score(task='binary')
+        self.train_F1 = F1Score(task="binary")
+        self.val_F1 = F1Score(task="binary")
         self.calc_loss = nn.BCEWithLogitsLoss()
 
     def forward(
@@ -595,7 +594,7 @@ class AGGExperimentKDDInterpolation(pl.LightningModule):
         self.model_params = deepcopy(model_params)
         type = self.model_params.pop("type")
         if type == "Transformer":
-            self.agg = AsynchronousGraphGeneratorTransformer(**self.model_params)
+            self.agg = AsynchronousGraphGenerator(**self.model_params)
         else:
             self.agg = AsynchronousGraphGenerator(**self.model_params)
         self.logging_params = logging_params
@@ -631,11 +630,11 @@ class AGGExperimentKDDInterpolation(pl.LightningModule):
         loss = self.calc_loss(y_hat, graph.target.features.to(self.device))
         return loss, y_hat, attention_list
 
-    def rescale_normal_data(self, data: torch.Tensor, key: str = 'PM2.5'):
+    def rescale_normal_data(self, data: torch.Tensor, key: str = "PM2.5"):
         if self.scaler is None:
             return data
         scaling = self.scaler[key]
-        return data*scaling['std'] + scaling['mean']
+        return data * scaling["std"] + scaling["mean"]
 
     def training_step(
         self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
@@ -659,10 +658,10 @@ class AGGExperimentKDDInterpolation(pl.LightningModule):
             on_epoch=True,
             batch_size=self.batch_size,
         )
-        pm25_mask = graph_sample.target.type_index == 0
+        pm25_mask: torch.LongTensor = graph_sample.target.type_index == 0
         if pm25_mask.any():
-            y_hat_PM25 = self.rescale_normal_data(y_hat[pm25_mask], key='PM2.5')
-            target_PM25 = self.rescale_normal_data(target[pm25_mask], key='PM2.5')
+            y_hat_PM25 = self.rescale_normal_data(y_hat[pm25_mask], key="PM2.5")
+            target_PM25 = self.rescale_normal_data(target[pm25_mask], key="PM2.5")
             self.train_PM25_RMSE(y_hat_PM25, target_PM25)
             self.log(
                 "train_PM25_RMSE",
@@ -721,10 +720,10 @@ class AGGExperimentKDDInterpolation(pl.LightningModule):
             on_epoch=True,
             batch_size=self.batch_size,
         )
-        pm25_mask = graph_sample.target.type_index == 0
+        pm25_mask: torch.LongTensor = graph_sample.target.type_index == 0
         if pm25_mask.any():
-            y_hat_PM25 = self.rescale_normal_data(y_hat[pm25_mask], key='PM2.5')
-            target_PM25 = self.rescale_normal_data(target[pm25_mask], key='PM2.5')
+            y_hat_PM25 = self.rescale_normal_data(y_hat[pm25_mask], key="PM2.5")
+            target_PM25 = self.rescale_normal_data(target[pm25_mask], key="PM2.5")
             self.val_PM25_RMSE(y_hat_PM25, target_PM25)
             self.log(
                 "val_PM25_RMSE",
@@ -832,7 +831,7 @@ class AGGExperimentAQIInterpolation(pl.LightningModule):
         if self.scaler is None:
             return data
         scaling = self.scaler
-        return data*scaling['std'] + scaling['mean']
+        return data * scaling["std"] + scaling["mean"]
 
     def training_step(
         self, graph_sample: ContinuousTimeGraphSample, sample_idx: int

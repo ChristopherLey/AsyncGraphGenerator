@@ -50,8 +50,10 @@ def main():
         dest="ckpt",
         metavar="FILE",
         help="path to checkpoint",
-        default="lightning_logs/AGG-aqi_Transformer_10%_steps_150_inter-15-05_19:52:47/checkpoints/model-epoch=464-val_RMSE_epoch=0.174923.ckpt",
-        # default=None,
+        default=(
+            "lightning_logs/AGG-aqi_Transformer_10%_steps_150_inter-15-05_19:52:47/"
+            "checkpoints/model-epoch=464-val_RMSE_epoch=0.174923.ckpt"
+        ),
     )
     args = parser.parse_args()
     if args.ckpt is not None:
@@ -74,7 +76,7 @@ def main():
         except yaml.YAMLError as exc:
             print(exc)
     if model_config is not None:
-        config['model_params'] = model_config['model_params']
+        config["model_params"] = model_config["model_params"]
     if hasattr(sys, "gettrace") and sys.gettrace() is not None:
         print("Debugging Mode")
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -93,13 +95,13 @@ def main():
             sparsity=config["data_params"]["sparsity"],
             db_config=Path(config["data_params"]["db_config"]),
             version="train",
-            block_steps=config['data_params']['block_steps'],
-            strict_pm25=config['data_params']['strict_pm25'],
+            block_steps=config["data_params"]["block_steps"],
+            strict_pm25=config["data_params"]["strict_pm25"],
         )
         train_length = len(train_reader)
         subset = floor(train_length * config["data_params"]["subset"])
         print(f"Training with a subset of {subset}/{train_length}")
-        print(f'Total train dataset length: {train_length}')
+        print(f"Total train dataset length: {train_length}")
         shuffle = True
     else:
         subset = None
@@ -111,8 +113,8 @@ def main():
         version="train",
         subset=subset,
         shuffle=shuffle,
-        block_steps=config['data_params']['block_steps'],
-        strict_pm25=config['data_params']['strict_pm25'],
+        block_steps=config["data_params"]["block_steps"],
+        strict_pm25=config["data_params"]["strict_pm25"],
     )
     train_dataloader = DataLoader(
         train_reader,
@@ -128,8 +130,8 @@ def main():
         sparsity=config["data_params"]["sparsity"],
         db_config=Path(config["data_params"]["db_config"]),
         version="test",
-        block_steps=config['data_params']['block_steps'],
-        strict_pm25=config['data_params']['strict_pm25'],
+        block_steps=config["data_params"]["block_steps"],
+        strict_pm25=config["data_params"]["strict_pm25"],
     )
     val_dataloader = DataLoader(
         val_reader,
@@ -144,7 +146,7 @@ def main():
     config["model_params"]["num_node_types"] = len(train_reader.type_index)
     config["model_params"]["num_spatial_components"] = len(train_reader.spatial_index)
     config["model_params"]["num_categories"] = len(train_reader.category_index)
-    config['logging_params']['scaling'] = train_reader.meta_data['scaling']
+    config["logging_params"]["scaling"] = train_reader.meta_data["scaling"]
 
     model = AGGExperimentKDDInterpolation(
         model_params=config["model_params"],
@@ -170,7 +172,6 @@ def main():
         mode="min",
         filename="model-{epoch:02d}-{val_MAE_epoch:.6f}",
     )
-
 
     callbacks = [mse_callback, rmse_callback, mae_callback]
 

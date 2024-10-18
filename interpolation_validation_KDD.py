@@ -30,7 +30,7 @@ from tqdm import trange
 from AGG.extended_typing import collate_graph_samples
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.graph_dataset import GraphDataset
-from AGG.transformer_model import AsynchronousGraphGeneratorTransformer
+from AGG.model import AsynchronousGraphGenerator
 from Datasets.Beijing.datareader import create_data_block
 from Datasets.Beijing.datareader import features
 from Datasets.Beijing.datareader import random_index
@@ -84,7 +84,6 @@ for n in trange(0, remainder.shape[0] - block_size, block_size):
         block_size,
         n,
         time_scale,
-        True,
         params,
         sample_count,
     )
@@ -92,7 +91,7 @@ for n in trange(0, remainder.shape[0] - block_size, block_size):
         data_set.append(write_data)
 
 config["model_params"].pop("type")
-agg = AsynchronousGraphGeneratorTransformer(**config["model_params"])
+agg = AsynchronousGraphGenerator(**config["model_params"])
 agg.load_state_dict(checkpoint["state_dict"])
 agg.eval()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -109,10 +108,10 @@ def create_batch(data_set: list) -> ContinuousTimeGraphSample:
 
 
 def interpolate_mean(
-        time_array: np.ndarray,
-        value_array: np.ndarray,
-        est_time_array: np.ndarray,
-        kernel_width: int
+    time_array: np.ndarray,
+    value_array: np.ndarray,
+    est_time_array: np.ndarray,
+    kernel_width: int,
 ) -> np.ndarray:
     interpolated_value_array = np.zeros_like(est_time_array)
     for n, est_time in enumerate(est_time_array):
@@ -208,23 +207,26 @@ for station in unique_stations:
         time_series[station]["time"],
         time_series[station]["input"],
         time_series[station]["est_time"],
-        3)
+        3,
+    )
     interpolation_mean_5 = interpolate_mean(
         time_series[station]["time"],
         time_series[station]["input"],
         time_series[station]["est_time"],
-        5)
+        5,
+    )
     interpolation_mean_7 = interpolate_mean(
         time_series[station]["time"],
         time_series[station]["input"],
         time_series[station]["est_time"],
-        7)
+        7,
+    )
     interpolation_mean_9 = interpolate_mean(
         time_series[station]["time"],
         time_series[station]["input"],
         time_series[station]["est_time"],
-        9)
-
+        9,
+    )
 
     plt.figure(figsize=(20, 10), dpi=300)
     plt.plot(
@@ -252,11 +254,18 @@ for station in unique_stations:
     plt.legend()
     plt.xlabel("Time (h)")
     plt.ylabel("PM2.5")
-    plt.title(f"PM2.5 at {station} with sparsity={sparsity*100:2g}%"
-              f"\nRMSE: {np.sqrt(np.mean(np.power(time_series[station]['pm25_est'] - time_series[station]['pm25'], 2.0))):3g}"
-              f"\nRMSE mean kernel:3: {np.sqrt(np.mean(np.power(interpolation_mean_3 - time_series[station]['pm25'], 2.0))):3g}"
-              f"\nRMSE mean kernel:5: {np.sqrt(np.mean(np.power(interpolation_mean_5 - time_series[station]['pm25'], 2.0))):3g}"
-              f"\nRMSE mean kernel:7: {np.sqrt(np.mean(np.power(interpolation_mean_7 - time_series[station]['pm25'], 2.0))):3g}"
-              f"\nRMSE mean kernel:9: {np.sqrt(np.mean(np.power(interpolation_mean_9 - time_series[station]['pm25'], 2.0))):3g}")
+    plt.title(
+        f"PM2.5 at {station} with sparsity={sparsity*100:2g}%"
+        f"\nRMSE: "
+        f"{np.sqrt(np.mean(np.power(time_series[station]['pm25_est'] - time_series[station]['pm25'], 2.0))):3g}"
+        f"\nRMSE mean kernel:3: "
+        f"{np.sqrt(np.mean(np.power(interpolation_mean_3 - time_series[station]['pm25'], 2.0))):3g}"
+        f"\nRMSE mean kernel:5: "
+        f"{np.sqrt(np.mean(np.power(interpolation_mean_5 - time_series[station]['pm25'], 2.0))):3g}"
+        f"\nRMSE mean kernel:7: "
+        f"{np.sqrt(np.mean(np.power(interpolation_mean_7 - time_series[station]['pm25'], 2.0))):3g}"
+        f"\nRMSE mean kernel:9: "
+        f"{np.sqrt(np.mean(np.power(interpolation_mean_9 - time_series[station]['pm25'], 2.0))):3g}"
+    )
     plt.savefig(figure_path / f"pm25_{station}_{sparsity*100:2g}%.png")
     plt.close()

@@ -743,15 +743,15 @@ def construct_outcome_physionet(config: dict, exists_ok: bool = True):
         normalise_physionet(config)
     assert scale_db.estimated_document_count() > 0
     outcome_db = db["outcomes"]
-    outcome_alive = outcome_db['alive']
-    outcome_dead = outcome_db['dead']
-    if outcome_db['alive'].estimated_document_count() > 0:
+    outcome_alive = outcome_db["alive"]
+    outcome_dead = outcome_db["dead"]
+    if outcome_db["alive"].estimated_document_count() > 0:
         if exists_ok:
             return
         else:
             outcome_db.drop()
-            outcome_db['alive'].drop()
-            outcome_db['dead'].drop()
+            outcome_db["alive"].drop()
+            outcome_db["dead"].drop()
     root_path = Path(config["data_root"])
     set_a = root_path / "Outcomes" / "Outcomes-a.txt"
     set_b = root_path / "Outcomes" / "Outcomes-b.txt"
@@ -761,7 +761,14 @@ def construct_outcome_physionet(config: dict, exists_ok: bool = True):
         with open(dir_loc, "r") as f:
             data_str_list: list[str] = f.readlines()
         for i in range(1, len(data_str_list)):
-            record_id_str, SAPS_I, SOFA, Length_of_stay, Survival, In_hospital_death = data_str_list[i][:-1].split(",")
+            (
+                record_id_str,
+                SAPS_I,
+                SOFA,
+                Length_of_stay,
+                Survival,
+                In_hospital_death,
+            ) = data_str_list[i][:-1].split(",")
             record_id = int(record_id_str)
             SAPS_I = int(SAPS_I)
             SOFA = int(SOFA)
@@ -782,12 +789,12 @@ def construct_outcome_physionet(config: dict, exists_ok: bool = True):
                 outcome_dead.insert_one(outcome_db)
 
 
-def create_graph(data: dict, outcome: dict,  longest_node: int, mask_ratio: float = 0.0):
+def create_graph(data: dict, outcome: dict, longest_node: int, mask_ratio: float = 0.0):
     node_features = np.array(data["node_features"])
     if mask_ratio > 0.0:
         index = np.arange(node_features.shape[0])
         np.random.shuffle(index)
-        mask = index[int(np.floor(node_features.shape[0] * mask_ratio)):]
+        mask = index[int(np.floor(node_features.shape[0] * mask_ratio)) :]
         mask.sort()
     else:
         mask = np.arange(node_features.shape[0])
@@ -799,7 +806,8 @@ def create_graph(data: dict, outcome: dict,  longest_node: int, mask_ratio: floa
     )
     graph["node_features"] = graph["node_features"].tolist()
     graph["key_padding_mask"] = (
-            np.pad(np.ones(mask.shape[0]), (0, padding_size), "constant") != 1).tolist()
+        np.pad(np.ones(mask.shape[0]), (0, padding_size), "constant") != 1
+    ).tolist()
     time = np.array(data["time"])
     relative_time = time.min()
     time = time[mask]
@@ -817,10 +825,11 @@ def create_graph(data: dict, outcome: dict,  longest_node: int, mask_ratio: floa
     ).tolist()
     graph["category_index"] = np.pad(
         np.array(data["category_index"])[mask, :],
-        ((0, padding_size), (0, 0)), ).tolist()
+        ((0, padding_size), (0, 0)),
+    ).tolist()
     assert (
-            len(graph["category_index"]) == longest_node
-            and len(graph["category_index"][0]) == 3
+        len(graph["category_index"]) == longest_node
+        and len(graph["category_index"][0]) == 3
     ), f"{graph['category_index'].shape=}"
     target = copy.deepcopy(target_template)
     target.pop("type_index")
@@ -834,9 +843,7 @@ def create_graph(data: dict, outcome: dict,  longest_node: int, mask_ratio: floa
     target["category_index"] = [
         data["category_index"][0],
     ]
-    target["time"] = [
-        0
-    ]
+    target["time"] = [0]
     graph["target"] = target
     return graph
 
@@ -857,7 +864,7 @@ def decompose_physionet_data_k_fold(
         normalise_physionet(config)
     assert scale_db.estimated_document_count() > 0
     outcome_db = db["outcomes"]
-    if outcome_db['alive'].estimated_document_count() == 0 or not exists_ok:
+    if outcome_db["alive"].estimated_document_count() == 0 or not exists_ok:
         construct_outcome_physionet(config, exists_ok)
     # create block db
     if masked_ratio > 0.0:
@@ -868,8 +875,8 @@ def decompose_physionet_data_k_fold(
     test_block = block_db["test"]
     train_block = block_db["train"]
     if (
-            test_block.estimated_document_count() > 0
-            and train_block.estimated_document_count() > 0
+        test_block.estimated_document_count() > 0
+        and train_block.estimated_document_count() > 0
     ):
         if exists_ok:
             return
@@ -887,25 +894,27 @@ def decompose_physionet_data_k_fold(
         "time": max_time,
         "normalisation": normalisation,
         "longest_node": longest_node,
-        'k-fold': k,
+        "k-fold": k,
     }
-    dead_count = outcome_db['dead'].estimated_document_count()
-    alive_count = outcome_db['alive'].estimated_document_count()
-    test_count_alive = int(np.floor(alive_count//k))
-    test_count_dead = int(np.floor(dead_count//k))
+    dead_count = outcome_db["dead"].estimated_document_count()
+    alive_count = outcome_db["alive"].estimated_document_count()
+    test_count_alive = int(np.floor(alive_count // k))
+    test_count_dead = int(np.floor(dead_count // k))
     dead_idx = np.arange(dead_count)
     np.random.shuffle(dead_idx)
     alive_idx = np.arange(alive_count)
     np.random.shuffle(alive_idx)
     k_indexes = []
     for i in range(k):
-        if i == k-1:
-            test_dead_idx = dead_idx[i*test_count_dead:]
-            test_alive_idx = alive_idx[i*test_count_alive:]
+        if i == k - 1:
+            test_dead_idx = dead_idx[i * test_count_dead :]
+            test_alive_idx = alive_idx[i * test_count_alive :]
             k_indexes.append((test_dead_idx, test_alive_idx))
         else:
-            test_dead_idx = dead_idx[i * test_count_dead:(i + 1) * test_count_dead]
-            test_alive_idx = alive_idx[i * test_count_alive:(i + 1) * test_count_alive]
+            test_dead_idx = dead_idx[i * test_count_dead : (i + 1) * test_count_dead]
+            test_alive_idx = alive_idx[
+                i * test_count_alive : (i + 1) * test_count_alive
+            ]
             k_indexes.append((test_dead_idx, test_alive_idx))
     block_db.insert_one(meta)
     for k_fold in range(k):
@@ -915,7 +924,7 @@ def decompose_physionet_data_k_fold(
         test_index_count = 0
         test_dead_idx, test_alive_idx = k_indexes[k_fold]
 
-        alive_cursor = outcome_db['alive'].find({})
+        alive_cursor = outcome_db["alive"].find({})
         for n, outcome in tqdm(enumerate(alive_cursor)):
             data = scale_db.find_one({"idx": {"$eq": outcome["idx"]}})
             if data is None:
@@ -932,7 +941,7 @@ def decompose_physionet_data_k_fold(
                     graph_copy["idx"] = train_index_count
                     train_index_count += 1
                     k_db_train.insert_one(graph_copy)
-        dead_cursor = outcome_db['dead'].find({})
+        dead_cursor = outcome_db["dead"].find({})
         for m, outcome in tqdm(enumerate(dead_cursor)):
             data = scale_db.find_one({"idx": {"$eq": outcome["idx"]}})
             if data is None:
@@ -968,11 +977,13 @@ def decompose_physionet_data_classification(
         normalise_physionet(config)
     assert scale_db.estimated_document_count() > 0
     outcome_db = db["outcomes"]
-    if outcome_db['alive'].estimated_document_count() == 0 or not exists_ok:
+    if outcome_db["alive"].estimated_document_count() == 0 or not exists_ok:
         construct_outcome_physionet(config, exists_ok)
     # create block db
     if masked_ratio > 0.0:
-        block_name = f"classification_{test_fraction*100:2g}%-masked_{masked_ratio*100:2g}%"
+        block_name = (
+            f"classification_{test_fraction*100:2g}%-masked_{masked_ratio*100:2g}%"
+        )
     else:
         block_name = f"classification_{test_fraction*100:2g}%-balanced"
     block_db = db[block_name]
@@ -998,10 +1009,10 @@ def decompose_physionet_data_classification(
         "time": max_time,
         "normalisation": normalisation,
         "longest_node": longest_node,
-        'test_fraction': test_fraction,
+        "test_fraction": test_fraction,
     }
-    dead_count = outcome_db['dead'].estimated_document_count()
-    alive_count = outcome_db['alive'].estimated_document_count()
+    dead_count = outcome_db["dead"].estimated_document_count()
+    alive_count = outcome_db["alive"].estimated_document_count()
     test_count_alive = int(np.floor(alive_count * test_fraction))
     test_count_dead = int(np.floor(dead_count * test_fraction))
     dead_idx = np.arange(dead_count)
@@ -1014,7 +1025,7 @@ def decompose_physionet_data_classification(
     block_db.insert_one(meta)
     train_index_count = 0
     test_index_count = 0
-    alive_cursor = outcome_db['alive'].find({})
+    alive_cursor = outcome_db["alive"].find({})
     for n, outcome in tqdm(enumerate(alive_cursor)):
         data = scale_db.find_one({"idx": {"$eq": outcome["idx"]}})
         if data is None:
@@ -1032,7 +1043,7 @@ def decompose_physionet_data_classification(
                 train_index_count += 1
                 train_block.insert_one(graph_copy)
 
-    dead_cursor = outcome_db['dead'].find({})
+    dead_cursor = outcome_db["dead"].find({})
     for m, outcome in tqdm(enumerate(dead_cursor)):
         data = scale_db.find_one({"idx": {"$eq": outcome["idx"]}})
         if data is None:
@@ -1083,7 +1094,9 @@ class ICUData(GraphDataset):
         if classification:
             if k_fold is not None:
                 if sparsity > 0.0:
-                    block_name = f"classification_{k_fold}-fold-masked_{sparsity * 100:2g}%"
+                    block_name = (
+                        f"classification_{k_fold}-fold-masked_{sparsity * 100:2g}%"
+                    )
                 else:
                     block_name = f"classification_{k_fold}-fold-masked-balanced"
             else:
@@ -1209,9 +1222,8 @@ if __name__ == "__main__":
         force_preprocessing=False,
         sparsity=0.1,
         k_fold=5,
-        k_fold_index=0
+        k_fold_index=0,
     )
     print(len(test_obj))  # 11701077
     assert isinstance(len(test_obj), int)
     print(test_obj[0])
-

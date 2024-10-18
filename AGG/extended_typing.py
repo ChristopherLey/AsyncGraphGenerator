@@ -15,6 +15,7 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+import numpy as np
 import torch
 from pydantic import BaseModel
 from pydantic import field_validator
@@ -22,7 +23,6 @@ from pydantic import ValidationInfo
 from torch import BoolTensor
 from torch import FloatTensor
 from torch import LongTensor
-import numpy as np
 
 
 def cast_2_float_tensor(v: list | FloatTensor, info: ValidationInfo, **kwargs):
@@ -122,7 +122,7 @@ class TargetNode(BaseModel):
     @field_validator("spatial_index", mode="before")
     @classmethod
     def create_spatial_index(
-            cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
+        cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
     ):
         if isinstance(v, LongTensor):
             entry = v
@@ -243,7 +243,7 @@ class ContinuousTimeGraphSample(BaseModel):
     @field_validator("spatial_index", mode="before")
     @classmethod
     def create_spatial_index(
-            cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
+        cls, v: dict | LongTensor | FloatTensor, info: ValidationInfo
     ):
         if isinstance(v, LongTensor):
             entry = v
