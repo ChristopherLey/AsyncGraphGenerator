@@ -63,7 +63,7 @@ time_scale = 3600 * 72
 test_masks = test_masks[0:2]
 block_size = config["data_params"]["block_size"]
 save_dir = Path("./prediction_data.pkl")
-recalculate = True
+recalculate = False
 if save_dir.exists() and not recalculate:
     with open(save_dir, "rb") as f:
         data_set = pickle.load(f)
@@ -228,8 +228,9 @@ colours = [
     "black",
     "lime",
 ]
+plt.rcParams.update({'font.size': 22})
 for station in time_series:
-    plt.figure(figsize=(20, 10), dpi=300)
+    plt.figure(figsize=(20, 10), dpi=600)
     plot_set = set()
     for i in range(len(time_series[station]["index_times"])):
         type = time_series[station]["index_types"][i]
@@ -268,9 +269,11 @@ for station in time_series:
         label="PM2.5 Target",
         markersize=10,
     )
-    plt.xlabel("Time", fontsize=18)
-    plt.ylabel("Feature Value", fontsize=18)
-    plt.legend()
-    plt.title(f"{station} station PM2.5 prediction", fontsize=20)
+    plt.xlabel("Time", fontsize=22)
+    plt.xticks(fontsize=20)
+    plt.ylabel("Feature Value", fontsize=22)
+    plt.yticks(fontsize=20)
+    plt.legend(fontsize=20)
+    plt.title(f"{station} station PM2.5 prediction", fontsize=22)
     plt.savefig(figure_path / f"prediction_station_{station}.png")
     plt.close()
