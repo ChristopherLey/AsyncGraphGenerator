@@ -1,0 +1,31 @@
+data_params:
+  batch_size: 400
+  block_size: 250
+  block_steps: 1
+  db_config: Datasets/Foreign_Exchange_Rates/data/mongo_config.yaml
+  num_workers: 7
+  sparsity: 0.7
+logging_params:
+  name: AGG_v4
+  scaling: ~
+model_params:
+  attention_drop: 0.5
+  categorical_embedding_dim: 0
+  categorical_input: -1
+  dropout: 0.5
+  feature_dim: 16
+  input_dim: 1
+  num_heads: 8
+  num_layers: 2
+  query_includes_categorical: false
+  spatial_embedding_dim: 0
+  time_embedding_dim: 16
+  type: Transformer
+  type_embedding_dim: 16
+optimiser_params:
+  lr: 0.001
+  max_lr: 0.001
+  min_lr: 0.0001
+  total_iters: 200
+trainer_params:
+  gradient_clip_val: 1.0

@@ -228,7 +228,7 @@ colours = [
     "black",
     "lime",
 ]
-plt.rcParams.update({'font.size': 22})
+plt.rcParams.update({"font.size": 22})
 for station in time_series:
     plt.figure(figsize=(20, 10), dpi=600)
     plot_set = set()

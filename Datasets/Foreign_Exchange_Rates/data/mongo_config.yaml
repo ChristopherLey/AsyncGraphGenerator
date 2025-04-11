@@ -1,0 +1,4 @@
+data_root: Datasets/Foreign_Exchange_Rates/data/Foreign_Exchange_Rates.csv
+base: 'Forex'
+host: '127.0.0.1'
+port: 27017
