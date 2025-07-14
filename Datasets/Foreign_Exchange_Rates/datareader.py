@@ -22,16 +22,15 @@ from random import randint
 from typing import Dict
 from typing import Optional
 
-
 import numpy as np
 import yaml
-from .data.data_masks import test_masks
-from .data.data_masks import training_masks
-from .data.data_masks import validation_masks
 from dateutil.relativedelta import relativedelta
 from pymongo import MongoClient
 from tqdm import trange
 
+from .data.data_masks import test_masks
+from .data.data_masks import training_masks
+from .data.data_masks import validation_masks
 from AGG.extended_typing import ContinuousTimeGraphSample
 from AGG.graph_dataset import GraphDataset
 from Datasets.data_tools import random_index
@@ -80,7 +79,7 @@ graph_template: dict = {
     "category_index": [],
 }
 
-#%%
+
 def normalise(feature, scaling):
     return (feature - scaling["mean"]) / scaling["std"]
 
@@ -167,6 +166,7 @@ def decompose_raw_forex_data(config: dict, replace: bool = False):
                     continue
         db["raw"].insert_many(raw_graph)
 
+
 def create_forex_data_block(
     raw: list[dict],
     input_index: list,
@@ -179,9 +179,7 @@ def create_forex_data_block(
     for k in range(len(input_index)):
         raw_entry = raw[input_index[k]]
         graph["node_features"].append(raw_entry["node_features"])
-        graph["time"].append(
-            (max_time - raw_entry["time"]).days / time_scale
-        )
+        graph["time"].append((max_time - raw_entry["time"]).days / time_scale)
         graph["type_index"].append(raw_entry["type_index"])
     graph["key_padding_mask"] = (np.zeros_like(input_index) != 0).tolist()
     removed_index_array = np.array(target_index)
@@ -208,9 +206,15 @@ def create_forex_data_block(
         write_data.append(graph_sample)
     return write_data, sample_count
 
-def create_forex_dataset(config: dict, block_size: int, sparsity=0.3, block_steps: int = 22,
-                         replace_dataset: bool=False,
-                         replace_raw: bool=False):
+
+def create_forex_dataset(
+    config: dict,
+    block_size: int,
+    sparsity=0.3,
+    block_steps: int = 22,
+    replace_dataset: bool = False,
+    replace_raw: bool = False,
+):
     assert 0 < sparsity < 1.0
     mongo_db_client = MongoClient(host=config["host"], port=config["port"])
     db = mongo_db_client[config["base"]]
@@ -234,18 +238,16 @@ def create_forex_dataset(config: dict, block_size: int, sparsity=0.3, block_step
     train_sample_count = 0
     min_len = np.inf
     for start_date in training_masks:
-        cursor = db_raw.find({
-            "time": {
-                "$gte": start_date,
-                "$lt": start_date + relativedelta(months=2)}
-        })
+        cursor = db_raw.find(
+            {"time": {"$gte": start_date, "$lt": start_date + relativedelta(months=2)}}
+        )
         samples = list(cursor)
         removed, remainder = random_index(len(samples), sparsity)
         min_len = min(min_len, len(remainder))
         for n in trange(0, len(remainder) - block_size, block_steps):
             write_data, train_sample_count = create_forex_data_block(
                 samples,
-                remainder[n: (n + block_size)],
+                remainder[n : (n + block_size)],
                 removed,
                 train_sample_count,
             )
@@ -254,18 +256,16 @@ def create_forex_dataset(config: dict, block_size: int, sparsity=0.3, block_step
     # filter out the testing sets
     test_sample_count = 0
     for start_date in test_masks:
-        cursor = db_raw.find({
-            "time": {
-                "$gte": start_date,
-                "$lt": start_date + relativedelta(months=2)}
-        })
+        cursor = db_raw.find(
+            {"time": {"$gte": start_date, "$lt": start_date + relativedelta(months=2)}}
+        )
         samples = list(cursor)
         removed, remainder = random_index(len(samples), sparsity)
         min_len = min(min_len, len(remainder))
         for n in trange(0, len(remainder) - block_size, block_steps):
             write_data, test_sample_count = create_forex_data_block(
                 samples,
-                remainder[n: (n + block_size)],
+                remainder[n : (n + block_size)],
                 removed,
                 test_sample_count,
             )
@@ -274,25 +274,22 @@ def create_forex_dataset(config: dict, block_size: int, sparsity=0.3, block_step
     # filter out the validation sets
     validation_sample_count = 0
     for start_date in validation_masks:
-        cursor = db_raw.find({
-            "time": {
-                "$gte": start_date,
-                "$lt": start_date + relativedelta(months=2)}
-        })
+        cursor = db_raw.find(
+            {"time": {"$gte": start_date, "$lt": start_date + relativedelta(months=2)}}
+        )
         samples = list(cursor)
         removed, remainder = random_index(len(samples), sparsity)
         min_len = min(min_len, len(remainder))
         for n in trange(0, len(remainder) - block_size, block_steps):
             write_data, validation_sample_count = create_forex_data_block(
                 samples,
-                remainder[n: (n + block_size)],
+                remainder[n : (n + block_size)],
                 removed,
                 validation_sample_count,
             )
             if len(write_data) > 0:
                 validation_block.insert_many(write_data)
     print(min_len)
-
 
 
 class ForexInterpolationDataset(GraphDataset):
@@ -325,7 +322,13 @@ class ForexInterpolationDataset(GraphDataset):
         self.db_handle = None
         block_name = f"block_{block_size:02d}_{100 * sparsity}%"
         if block_name not in db.list_collection_names() or replace_dataset:
-            create_forex_dataset(self.mongo_config, block_size, sparsity, block_steps, replace_dataset=replace_dataset)
+            create_forex_dataset(
+                self.mongo_config,
+                block_size,
+                sparsity,
+                block_steps,
+                replace_dataset=replace_dataset,
+            )
         else:
             print(f"Pre-processing found for {block_name=}")
 
@@ -378,13 +381,16 @@ class ForexInterpolationDataset(GraphDataset):
         sample = self.graph_transform(self.db_handle.find_one({"idx": item}))
         return sample
 
+
 def test_datareader():
     import os
+
     current_path = os.getcwd()
     test_obj = ForexInterpolationDataset(
         block_size=450,
         sparsity=0.3,
-        db_config= Path(current_path) / Path('Foreign_Exchange_Rates/data/mongo_config.yaml'),
+        db_config=Path(current_path)
+        / Path("Foreign_Exchange_Rates/data/mongo_config.yaml"),
         version="test",
     )
     print(len(test_obj))  # 1895393

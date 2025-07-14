@@ -18,7 +18,7 @@
 import io
 from copy import deepcopy
 from pathlib import Path
-from typing import Tuple, Any
+from typing import Tuple
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -26,7 +26,6 @@ import pytorch_lightning as pl
 import seaborn as sns
 import torch
 from PIL import Image
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torch import nn
 from torch.optim import Adam
 from torchmetrics import Accuracy
@@ -986,6 +985,7 @@ class AGGExperimentAQIInterpolation(pl.LightningModule):
         return [optimiser, ], [lr_scheduler, ]
         # fmt: on
 
+
 class AGGExperimentFXInterpolation(pl.LightningModule):
     def __init__(
         self,
@@ -1079,11 +1079,11 @@ class AGGExperimentFXInterpolation(pl.LightningModule):
         )
         return loss.detach().to("cpu"), y_hat.detach().to("cpu"), graph_sample
 
-    def test_step(
-            self, graph_sample: ContinuousTimeGraphSample, sample_idx: int
-    ):
+    def test_step(self, graph_sample: ContinuousTimeGraphSample, sample_idx: int):
         loss, y_hat, attention_list = self.forward(graph_sample)
-        self.log("test_mse_loss", loss.item(), prog_bar=True, batch_size=self.batch_size)
+        self.log(
+            "test_mse_loss", loss.item(), prog_bar=True, batch_size=self.batch_size
+        )
         target = graph_sample.target.features.to(self.device)
         self.test_MAE(y_hat, target)
         self.log(

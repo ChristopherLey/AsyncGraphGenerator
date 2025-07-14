@@ -19,14 +19,12 @@ import argparse
 import os
 import sys
 from datetime import datetime
-from math import floor
 from pathlib import Path
 from pprint import pprint
 
 import pytorch_lightning as pl
 import yaml
 from pytorch_lightning import loggers as pl_loggers
-from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.utils.data import DataLoader
 
 from AGG.experiments import AGGExperimentFXInterpolation
@@ -57,9 +55,7 @@ def main():
     if args.ckpt is not None:
         ckpt_path = args.ckpt
         ckpt_config_path = Path(f"{Path(args.ckpt).parent.parent}") / "config.yaml"
-        args.filename = (
-            Path(f"{ckpt_path.parent.parent}") / "config.yaml"
-        )
+        args.filename = Path(f"{ckpt_path.parent.parent}") / "config.yaml"
         with open(ckpt_config_path, "r") as file:
             try:
                 config = yaml.safe_load(file)

@@ -56,9 +56,7 @@ def main():
     if args.ckpt is not None:
         ckpt_path = args.ckpt
         ckpt_config = Path(f"{Path(args.ckpt).parent.parent}") / "config.yaml"
-        args.filename = (
-            Path(f"{ckpt_path.parent.parent}") / "config.yaml"
-        )
+        args.filename = Path(f"{ckpt_path.parent.parent}") / "config.yaml"
         with open(ckpt_config, "r") as file:
             try:
                 model_config = yaml.safe_load(file)
@@ -108,7 +106,7 @@ def main():
         version="train",
         subset=subset,
         shuffle=shuffle,
-        replace_dataset=True
+        replace_dataset=True,
     )
     train_dataloader = DataLoader(
         train_reader,

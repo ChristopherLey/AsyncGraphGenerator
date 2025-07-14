@@ -29,11 +29,42 @@ An illustration of the AGG self-supervised pipeline.
 **d)** The learnt graph encodes a rich representation of the underlying signal, where new samples to be generated through
 _**conditional attention generation**_; here, $c_g = blue$ and $\tau_g = t_N - t_*$.
 
+### Node generation (Imputation & Prediction)
+As previously mentioned, the AGG constructs asynchronous graphs of measurements free from assumptions about position and sample regularity.
+
+A classical example of data with missing entries "forced" into synchronous form, or alternatively imposing implicit structure where it may not exists.
+
+<img src="AGG_diagrams/time_series_matrix.png" width="200" title="Time Series graph">
+
+Noteable assumptions about this form $x_2$ on channel 2 ($x_2 = 107$) happens at the same time as $x_2 = 17$ (channel 3). As we all as there is an order in channels, i.e. channel 1 proceeds channel 2.
+
+The AGG relaxes spurious assumptions of structure and instead considers the multi-channel time series as a directed graph:
+
+<img src="AGG_diagrams/time_series_graph.png" width="400" title="Time Series graph">
+
+The directed graph encodes relevant causal relations and differences in channel and nothing more.
+Relations (graph weighting) is learned through the graph attention mechanism.
+
+Once relationships have been encoded in their respective nodes, $h_n$ is this diagram, these encoded node vectors can be
+used to generate new _unseen_ measurements through a novel transductive node generation, called
+__conditional node generation__. This conditions time and channel information to _inform_ the new relationships of the generated node.
+
+<img src="AGG_diagrams/time_series_inputation.png" width="400" title="Time Series imputation">
+
+## Structure
+
+In the paper "Asynchronous Graph Generator" a common architecture was used seen below.
+This consists of 2 _encoding_ layers and 1 _generation layer_.
+
 <img src="AGG_diagrams/architecture_v2.png" width="800" title="AGG Architecture">
 
-AGG model architecture: The sections of the network are indicated at the top of the figure. Inputs and target are
+The sections of the network are indicated at the top of the figure. Inputs and target are
 represented as circles and squares respectively, fixed operations are denoted by white blocks and learnable
 transformations in light grey blocks.
+
+It should be noted that the hyperparameters used are not _optimal_ but rather functional, further study is required
+in order to consider an optimal hyperparameter structure. Nor is it required that the model consists of only 2 layers,
+in fact the architecture (and this code) permits a model arbitrarily deep.
 
 
 ## Init repository
@@ -63,4 +94,5 @@ Stride length indirectly determines the number of samples generated for each dat
 described in the following diagram
 
 <img src="AGG_diagrams/stride_diagram.png" width="400" title="Stride Diagram">
+
 <img src="AGG_diagrams/stride_construction.png" width="400" title="Stride Description">
