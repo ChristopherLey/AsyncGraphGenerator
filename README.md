@@ -1,7 +1,7 @@
 # Asynchronous Graph Generator
 This is a repository for the code used in the paper ["Asynchronous Graph Generator"](https://arxiv.org/abs/2309.17335) by the authors
 
-[Dr. Christopher P. Ley](https://www.linkedin.com/in/christopher-p-ley/) & Dr. Felipe Tobar.
+[Dr. Christopher P. Ley](https://www.linkedin.com/in/christopher-p-ley/) & [Dr. Felipe Tobar](https://www.linkedin.com/in/felipe-tobar-99a61223/).
 
 ## Abstract
 We introduce the asynchronous graph generator (AGG), a novel graph attention network for imputation and prediction of
